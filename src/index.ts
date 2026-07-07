@@ -1,25 +1,18 @@
 import type { Plugin } from 'vite';
 import { Buffer } from 'node:buffer';
+import { AnalyzerOptions, Module } from './interface';
+import path from 'node:path';
+import { AnalyzerModule } from './analyzer-module';
+import { writeJsonReport } from './output/json';
 
 /** Vite/Rollup bundle item 的通用形状 */
-interface BundleItem {
-    type: 'chunk' | 'asset';
-    code?: string;
-    source?: string | Uint8Array;
-    fileName?: string;
-    name?: string;
-}
-
+/**
+ * 各类别统计汇总信息
+ */
 interface CategorySummary {
-    count: number;
-    totalSize: number;
-    files: string[];
-}
-
-interface BundleRecord {
-    fileName: string;
-    type: 'chunk' | 'asset';
-    size: number;
+    count: number; // 文件数量
+    totalSize: number; // 文件总字节数
+    files: string[]; // 所有文件名
 }
 /**
  * 获取文件扩展名
@@ -47,28 +40,6 @@ function categorizeFile(fileName: string): string {
     return '其他';
 }
 /**
- * 获取文件大小
- * @param item - 文件项
- * @returns 文件大小
- * @description 在 vite / rollup 的 bundle 结果中，chunk 类型的文件内容以 code 字符串的形式存储，
- *              获取 code 的 utf-8 编码时的字节长度（Buffer.byteLength），就可以准确反映最终生成文件的实际字节大小
- *              等价于该文件内容写入磁盘时的占用空间，这样就能得到文件真实的体积
- */
-function getItemSize(item: BundleItem): number {
-    if (item.type === 'chunk' && item.code) {
-        return Buffer.byteLength(item.code, 'utf-8');
-    }
-    // asset
-    const source = item.source;
-    if (source instanceof Uint8Array) {
-        return source.byteLength;
-    }
-    if (typeof source === 'string') {
-        return Buffer.byteLength(source, 'utf-8');
-    }
-    return 0;
-}
-/**
  * 格式化文件大小的显示
  * @param bytes - 字节大小
  * @returns 格式化后的文件大小
@@ -93,10 +64,75 @@ function padRight(str: string, len: number): string {
     // 中文字符按 2 个宽度计算
     let visualLen = 0;
     for (const ch of str) {
+        // 判断是否为“宽字符”（East Asian Wide / Fullwidth），宽字符按 2 列计
+        //
+        // 正则 [一-鿿　-〿＀-￯] 由三段 Unicode 范围组成：
+        //
+        // 1. 一-鿿  → U+4E00 ~ U+9FFF
+        //    CJK 统一汉字基本区，常见中文汉字（一、中、文…）
+        //
+        // 2.　-〿  → U+3000 ~ U+303F
+        //    CJK 符号与标点，含：
+        //    - U+3000 全角空格（　）
+        //    - 、。〃「」等中文标点
+        //
+        // 3. ＀-￯  → U+FF00 ~ U+FFEF
+        //    半角/全角形式区，含：
+        //    - 全角 ASCII（ＡＢＣ、１２３、！？）
+        //    - 全角片假名、韩文音节等
+        //
+        // 不在上述范围的字符（如 a、1、-）按半角 1 列计算
         visualLen += /[一-鿿　-〿＀-￯]/.test(ch) ? 2 : 1;
     }
     return str + ' '.repeat(Math.max(0, len - visualLen));
 }
+/**
+ * 打印终端总结（Bundle 分析报告）
+ */
+function printTerminalSummary(modules: Module[]) {
+    if (modules.length === 0) return;
+
+    const categories: Record<string, CategorySummary> = {
+        JS: { count: 0, totalSize: 0, files: [] },
+        CSS: { count: 0, totalSize: 0, files: [] },
+        图片: { count: 0, totalSize: 0, files: [] },
+        其他: { count: 0, totalSize: 0, files: [] },
+    };
+
+    for (const mod of modules) {
+        const cat = categorizeFile(mod.filename);
+        categories[cat].count++;
+        categories[cat].totalSize += mod.parsedSize;
+    }
+
+    const totalSize = modules.reduce((sum, mod) => sum + mod.parsedSize, 0);
+    console.log('\n═══════════════════════════════════════════════');
+    console.log('  Bundle 分析报告');
+    console.log('═══════════════════════════════════════════════');
+    console.log(padRight('  分类', 8) + padRight('文件数', 10) + padRight('大小', 14) + '占比');
+    console.log('─────────────────────────────────────────────');
+    for (const cat of ['JS', 'CSS', '图片', '其他']) {
+        const info = categories[cat];
+        if (info.count === 0) continue;
+        const pct = ((info.totalSize / totalSize) * 100).toFixed(1);
+        console.log(
+            padRight(`  ${cat}`, 8) +
+                padRight(String(info.count), 10) +
+                padRight(formatSize(info.totalSize), 14) +
+                pct +
+                '%'
+        );
+    }
+    console.log('─────────────────────────────────────────────');
+    console.log(
+        padRight('  合计', 8) +
+            padRight(String(modules.length), 10) +
+            padRight(formatSize(totalSize), 14) +
+            '100.0%'
+    );
+    console.log('═══════════════════════════════════════════════\n');
+}
+
 /**
  * bundleAnalyzer 插件的主要作用：
  *   - 用于分析 Vite 或 Rollup 打包输出目录的所有文件体积和类型分布，并在打包完成后打印出详细的体积分析报告。
@@ -110,80 +146,44 @@ function padRight(str: string, len: number): string {
  *     ]
  *   }
  */
-export function bundleAnalyzer(options = {}): Plugin {
-    const bundleRecords: BundleRecord[] = [];
+export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
+    const analyzer = new AnalyzerModule();
+    let outDir = 'dist';
 
     return {
         name: 'vite-bundle-analyzer',
         apply: 'build',
         enforce: 'post',
+
+        /** 读取最终构建输出目录 */
+        configResolved(config) { 
+            outDir = path.resolve(config.root, config.build.outDir ?? 'dist');
+        },
         /**
          * outputBundle 参数来源于 rollup 的 generateBundle 钩子，
          * 它包含了构建过程中所有输出文件和资源的信息。
          * 在 Vite 的打包流程中，outputBundle 会被传递到插件的 generateBundle 钩子，用于分析和处理最终输出内容。
          */
-        generateBundle(_, outputBundle) {
-            for (const [fileName, item] of Object.entries(outputBundle)) {
-                const size = getItemSize(item);
-                bundleRecords.push({
-                    fileName,
-                    type: item.type,
-                    size,
-                });
+        async generateBundle(_, outputBundle) {
+            analyzer.setupRollupChunks(outputBundle);
+
+            for (const bundleName in outputBundle) {
+                await analyzer.addModule(outputBundle[bundleName]);
             }
         },
         /** Vite 和 Rollup 在打包流程完成后自动调用的钩子函数（callback），用于在所有文件输出后做最终处理或统计分析。 */
-        closeBundle() {
-            if (bundleRecords.length === 0) return;
+        async closeBundle() {
+            const modules = analyzer.processModule();
+            if (modules.length === 0) return;
 
-            const categories: Record<string, CategorySummary> = {
-                'JS':   { count: 0, totalSize: 0, files: [] },
-                'CSS':  { count: 0, totalSize: 0, files: [] },
-                '图片': { count: 0, totalSize: 0, files: [] },
-                '其他': { count: 0, totalSize: 0, files: [] },
-            };
-
-            for (const record of bundleRecords) {
-                const cat = categorizeFile(record.fileName);
-                categories[cat].count++;
-                categories[cat].totalSize += record.size;
-                categories[cat].files.push(record.fileName);
+            // 终端摘要
+            printTerminalSummary(modules);
+            
+            // JSON 输出
+            if (options.analyzerMode === 'json') {
+                const absPath = await writeJsonReport(modules, outDir, options.fileName ?? 'stats.json');
+                console.log(`  stats written → ${absPath}\n`);
             }
-
-            const totalSize = bundleRecords.reduce((sum, r) => sum + r.size, 0);
-
-            console.log('\n═══════════════════════════════════════════════');
-            console.log('  Bundle 分析报告');
-            console.log('═══════════════════════════════════════════════');
-            console.log(
-                padRight('  分类', 8) +
-                padRight('文件数', 10) +
-                padRight('大小', 14) +
-                '占比'
-            );
-            console.log('─────────────────────────────────────────────');
-
-            const order = ['JS', 'CSS', '图片', '其他'];
-            for (const cat of order) {
-                const info = categories[cat];
-                if (info.count === 0) continue;
-                const pct = ((info.totalSize / totalSize) * 100).toFixed(1);
-                console.log(
-                    padRight(`  ${cat}`, 8) +
-                    padRight(String(info.count), 10) +
-                    padRight(formatSize(info.totalSize), 14) +
-                    pct + '%'
-                );
-            }
-
-            console.log('─────────────────────────────────────────────');
-            console.log(
-                padRight('  合计', 8) +
-                padRight(String(bundleRecords.length), 10) +
-                padRight(formatSize(totalSize), 14) +
-                '100.0%'
-            );
-            console.log('═══════════════════════════════════════════════\n');
         },
     };
 }

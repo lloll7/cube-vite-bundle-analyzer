@@ -11,6 +11,7 @@ import { FilterPattern } from 'vite';
 import { byteToString, createBrotil, createGzip, stringToByte } from './shared.ts';
 import { GroupWithNode } from './trie.ts';
 import { createFilter } from '@rollup/pluginutils';
+import { pickupMappingsFromCodeStr } from './source-map.ts';
 
 /** 序列化后的非 JS asset（如 CSS、图片等） */
 interface SerializedModWithAsset {
@@ -115,7 +116,7 @@ function createCompressAlorithm(opt: AnalyzerModuleOptions) {
         brotli: createBrotil(brotli),
     };
 }
-
+/** 并行计算同一段内容的 gzip 与 brotli 压缩体积 */
 async function calcCompressedSize(
     b: Uint8Array,
     compress: ReturnType<typeof createCompressAlorithm>
@@ -181,11 +182,51 @@ export class AnalyzerNode {
             this.gzipSize = gzipSize;
         } else {
             const { code, imports, dynamicImports, map } = mod;
+            const sourceModules: Module[] = [];
 
             this.addImports(...imports, ...dynamicImports);
 
+            this.isAsset = false;
             this.mapSize = map.length;
             this.isEntry = mod.isEntry;
+
+            // code 可能是 Uint8Array，统一转为 string 供 source map 解析
+            const s = byteToString(code);
+            /**
+             * map 存在代表该模块是一个 JS chunk，并且包含 source map（用于还原源码和映射关系），
+             * 可用于进一步分析代码来源和体积归属
+             */
+            if (map) {
+                const { grouped, files } = pickupMappingsFromCodeStr(s, map);
+
+                for (const [id, { code: sourceCode }] of Object.entries(grouped)) {
+                    const b = stringToByte(sourceCode);
+                    const parsedSize = b.byteLength;
+                    const { gzipSize, brotliSize } = await calcCompressedSize(b, compress);
+
+                    this.gzipSize += gzipSize;
+                    this.brotliSize += brotliSize;
+                    this.parsedSize += parsedSize;
+                    // 每个源文件用自己的体积
+                    sourceModules.push({
+                        label: id,
+                        filename: id,
+                        isEntry: false,
+                        isAsset: false,
+                        parsedSize,
+                        gzipSize,
+                        brotliSize,
+                        mapSize: 0,
+                        source: [],
+                        imports: [],
+                        stats: [],
+                        groups: [],
+                    });
+                }
+
+                // 循环结束后一次性赋值
+                this.source = sourceModules;
+            }
         }
     }
 }

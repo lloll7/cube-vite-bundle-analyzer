@@ -155,6 +155,11 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
         apply: 'build',
         enforce: 'post',
 
+        config(config) {
+            if (!config.build) config.build = {};
+            config.build.sourcemap = true;
+        },
+
         /** 读取最终构建输出目录 */
         configResolved(config) { 
             outDir = path.resolve(config.root, config.build.outDir ?? 'dist');

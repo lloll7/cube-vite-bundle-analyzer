@@ -11,6 +11,11 @@ interface NodeDescriptor<T = Record<string, NonNullable<unknown>>> {
     filename: string;
 }
 
+interface NodeVisitor<T> {
+    enter?: (node, parent, isEndOfPath) => void;
+    leave?: (node, parent, isEndOfPath) => void;
+}
+
 export class Node<T = NonNullable<unknown>> implements NodeDescriptor<T> {
     meta: T;
     filename: string;
@@ -87,5 +92,25 @@ export class Trie<T> {
                 }
             }
         }
+    }
+
+    walk(node: Node<T>, vistor: NodeVisitor<T>) {
+        for (const [id, childNode] of node.children.entries()) {
+            const child = {
+                ...childNode.meta,
+                label: id,
+                filename: childNode.filename,
+                groups: childNode.groups,
+            };
+            // 叶子节点不需要 groups（已是最底层）
+            if (childNode.isEndOfPath) {
+                // @ts-expect-error safe operation
+                delete child.groups;
+            }
+            vistor.enter?.(child, node, childNode.isEndOfPath);
+            this.walk(childNode, vistor);
+            vistor.leave?.(child, node, childNode.isEndOfPath);
+        }
+        node.children.clear(); // 遍历完释放内存
     }
 }

@@ -13,7 +13,8 @@ export type OutputChunk = Extract<OutputBundle[0], { type: 'chunk' }>;
 export type PluginContext = ThisParameterType<RenderChunkFunction>
 
 export interface Module {
-    label: string; // 显示名，初期 = filename
+    /** 显示名，初期 = filename */
+    label: string;
     filename: string;
     isEntry: boolean;
     /** 是否为 asset 类型，asset 类型没有 isEntry */

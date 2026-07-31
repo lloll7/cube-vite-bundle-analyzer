@@ -3,7 +3,7 @@ import { bundleAnalyzer } from '../src/index.ts';
 
 export default defineConfig({
     root: __dirname,
-    plugins: [bundleAnalyzer({ analyzerMode: 'static' })],
+    plugins: [bundleAnalyzer({ analyzerMode: 'server' })],
     build: {
         outDir: 'dist',
         emptyOutDir: true,

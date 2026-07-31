@@ -262,6 +262,11 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
                 const absPath = await writeStaticHtmlReport(modules, outDir, options.fileName ?? 'stats.html');
                 console.log(`  stats written → ${absPath}\n`);
             }
+
+            if (options.analyzerMode === 'server') {
+                const { startServer } = await import('./output/server');
+                await startServer(modules, { port: options.analyzerPort ?? 8888, openAnalyzer: options.openAnalyzer });
+            }
         },
     };
 }

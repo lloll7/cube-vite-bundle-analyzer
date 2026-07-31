@@ -1,6 +1,6 @@
-import type { HookHandler, Plugin } from 'vite';
+import type { FilterPattern, HookHandler, Plugin } from 'vite';
 
-type RenderChunkFunction = NonNullable<HookHandler<Plugin['renderChunk']>>
+type RenderChunkFunction = NonNullable<HookHandler<Plugin['renderChunk']>>;
 
 export type GenerateBundleFunction = NonNullable<HookHandler<Plugin['generateBundle']>>;
 
@@ -10,7 +10,7 @@ export type OutputAsset = Extract<OutputBundle[0], { type: 'asset' }>;
 
 export type OutputChunk = Extract<OutputBundle[0], { type: 'chunk' }>;
 
-export type PluginContext = ThisParameterType<RenderChunkFunction>
+export type PluginContext = ThisParameterType<RenderChunkFunction>;
 
 export interface Module {
     /** 显示名，初期 = filename */
@@ -31,13 +31,17 @@ export interface Module {
     imports: string[];
     /** Phase 1 固定 []，Phase 2 再填 */
     source: Module[];
-    stats: Array<Module>
-    groups: Array<Module>
+    stats: Array<Module>;
+    groups: Array<Module>;
 }
 
-export interface AnalyzerOptions {
-    analyzerMode?: 'json'; // 不传则只打终端（Phase 0 行为）
-    fileName?: string; // 默认 'stats.json'
+interface AnalyzerOptions {
+    analyzerMode?: 'json' | 'static' | 'server'; // 不传则只输出终端表格
+    fileName?: string; // JSON/HTML 文件名
+    analyzerPort?: number; // server 模式端口
+    openAnalyzer?: boolean; // server 模式是否自动打开浏览器
+    include?: FilterPattern; // 文件过滤
+    exclude?: FilterPattern;
 }
 
 export type PathFormatter = (path: string, defaultWD: string) => string;

@@ -76,7 +76,7 @@ export class Trie<T> {
      */
     mergePrefixSingleDirectory(node = this.root) {
         for (const [key, childNode] of node.children.entries()) {
-            if (childNode.isEndOfPath) break;
+            if (childNode.isEndOfPath) continue;
 
             if (childNode.children.size > 1) {
                 this.mergePrefixSingleDirectory(childNode);
@@ -95,6 +95,7 @@ export class Trie<T> {
     }
 
     walk(node: Node<T>, vistor: NodeVisitor<T>) {
+        if (!node.children.size) return
         for (const [id, childNode] of node.children.entries()) {
             const child = {
                 ...childNode.meta,

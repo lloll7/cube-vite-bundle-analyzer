@@ -9,7 +9,8 @@ import type {
 } from './interface.ts';
 import { FilterPattern } from 'vite';
 import { byteToString, createBrotil, createGzip, stringToByte } from './shared.ts';
-import { GroupWithNode } from './trie.ts';
+import { Trie } from './trie.ts';
+import type { GroupWithNode } from './trie.ts'
 import { createFilter } from '@rollup/pluginutils';
 import { pickupMappingsFromCodeStr } from './source-map.ts';
 
@@ -132,6 +133,9 @@ function isSoucemap(filename: string) {
     return filename.slice(-3) === 'map';
 }
 
+function cleanPath(id: string): string {
+    return id.replace(/^((\.\.\/)+|(\.\.\\)+)/, '');
+}
 export class AnalyzerNode {
     /** Rollup 原始 id / 输出文件名 */
     originalId: string;
@@ -181,51 +185,73 @@ export class AnalyzerNode {
             this.brotliSize = brotliSize;
             this.gzipSize = gzipSize;
         } else {
-            const { code, imports, dynamicImports, map } = mod;
-            const sourceModules: Module[] = [];
+            const sources = new Trie<{
+                parsedSize: number,
+                brotliSize: number,
+                gzipSize: number
+            }>({ meta: { gzipSize: 0, brotliSize: 0, parsedSize: 0 } });
+
+            const { map, code, imports, dynamicImports } = mod;
 
             this.addImports(...imports, ...dynamicImports);
-
             this.isAsset = false;
             this.mapSize = map.length;
             this.isEntry = mod.isEntry;
 
             // code 可能是 Uint8Array，统一转为 string 供 source map 解析
             const s = byteToString(code);
+
             /**
              * map 存在代表该模块是一个 JS chunk，并且包含 source map（用于还原源码和映射关系），
              * 可用于进一步分析代码来源和体积归属
              */
             if (map) {
                 const { grouped, files } = pickupMappingsFromCodeStr(s, map);
+                // 并行：为每个源文件计算体积并插入 Trie
+                await Promise.all(
+                    Object.entries(grouped).map(async ([id, { code: sourceCode }]) => {
+                        const b = stringToByte(sourceCode);
+                        const parsedSize = b.byteLength;
+                        const { brotliSize, gzipSize } = await calcCompressedSize(b, compress);
+                        sources.insert(cleanPath(id), {
+                            meta: { parsedSize, gzipSize, brotliSize }
+                        });
+                    })
+                );
+            }
 
-                for (const [id, { code: sourceCode }] of Object.entries(grouped)) {
-                    const b = stringToByte(sourceCode);
-                    const parsedSize = b.byteLength;
-                    const { gzipSize, brotliSize } = await calcCompressedSize(b, compress);
+            // 合并单子目录路径，简化树结构
+            sources.mergePrefixSingleDirectory();
 
-                    this.gzipSize += gzipSize;
-                    this.brotliSize += brotliSize;
-                    this.parsedSize += parsedSize;
-                    // 每个源文件用自己的体积
-                    sourceModules.push({
-                        label: id,
-                        filename: id,
-                        isEntry: false,
-                        isAsset: false,
-                        parsedSize,
-                        gzipSize,
-                        brotliSize,
-                        mapSize: 0,
-                        source: [],
-                        imports: [],
-                        stats: [],
-                        groups: [],
-                    });
-                }
+            // DFS 遍历 Trie：enter 把子节点挂到 parent.groups，leave 向上聚合体积
+            sources.walk(sources.root, {
+                enter: (child, parent) => {
+                    if (parent) {
+                        parent.groups.push(child);
+                    }
+                },
+                leave: (child, _parent, end) => {
+                    if (child.groups && child.groups.length) {
+                        Object.assign(
+                            child,
+                            child.groups.reduce((acc, cur) => {
+                                acc.gzipSize += cur.gzipSize;
+                                acc.brotliSize += cur.brotliSize;
+                                acc.parsedSize += cur.parsedSize;
+                                return acc;
+                            }, { gzipSize: 0, brotliSize: 0, parsedSize: 0 })
+                        );
+                    }
+                },
+            });
 
-                // 循环结束后一次性赋值
-                this.source = sourceModules;
+            this.source = sources.root.groups;
+
+            // 把 source 子树体积汇总到 chunk 节点本身
+            for (const s of this.source) {
+                this.gzipSize += s.gzipSize;
+                this.brotliSize += s.brotliSize;
+                this.parsedSize += s.parsedSize;
             }
         }
     }

@@ -12,6 +12,8 @@ import { writeJsonReport } from './output/json';
 interface CategorySummary {
     count: number; // 文件数量
     totalSize: number; // 文件总字节数
+    totalGzipSize: number; // 文件 gzip 压缩后总字节数
+    totalBrotliSize: number; // 文件 brotli 压缩后总字节数
     files: string[]; // 所有文件名
 }
 /**
@@ -93,24 +95,28 @@ function printTerminalSummary(modules: Module[]) {
     if (modules.length === 0) return;
 
     const categories: Record<string, CategorySummary> = {
-        JS: { count: 0, totalSize: 0, files: [] },
-        CSS: { count: 0, totalSize: 0, files: [] },
-        图片: { count: 0, totalSize: 0, files: [] },
-        其他: { count: 0, totalSize: 0, files: [] },
+        JS: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
+        CSS: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
+        图片: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
+        其他: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
     };
 
     for (const mod of modules) {
         const cat = categorizeFile(mod.filename);
         categories[cat].count++;
         categories[cat].totalSize += mod.parsedSize;
+        categories[cat].totalGzipSize += mod.gzipSize;
+        categories[cat].totalBrotliSize += mod.brotliSize;
     }
 
     const totalSize = modules.reduce((sum, mod) => sum + mod.parsedSize, 0);
-    console.log('\n═══════════════════════════════════════════════');
+    const totalGzipSize = modules.reduce((sum, mod) => sum + mod.gzipSize, 0);
+    const totalBrotliSize = modules.reduce((sum, mod) => sum + mod.brotliSize, 0);
+    console.log('\n══════════════════════════════════════════════════════════════════════════');
     console.log('  Bundle 分析报告');
-    console.log('═══════════════════════════════════════════════');
-    console.log(padRight('  分类', 8) + padRight('文件数', 10) + padRight('大小', 14) + '占比');
-    console.log('─────────────────────────────────────────────');
+    console.log('══════════════════════════════════════════════════════════════════════════');
+    console.log(padRight('  分类', 8) + padRight('文件数', 10) + padRight('大小', 14) + padRight('占比', 14) + padRight('gzipSize', 14) + 'brotliSize');
+    console.log('─────────────────────────────────────────────────────────────────');
     for (const cat of ['JS', 'CSS', '图片', '其他']) {
         const info = categories[cat];
         if (info.count === 0) continue;
@@ -119,18 +125,21 @@ function printTerminalSummary(modules: Module[]) {
             padRight(`  ${cat}`, 8) +
                 padRight(String(info.count), 10) +
                 padRight(formatSize(info.totalSize), 14) +
-                pct +
-                '%'
+                padRight(pct + '%', 14) +
+                padRight(formatSize(info.totalGzipSize), 14) +
+                formatSize(info.totalBrotliSize)
         );
     }
-    console.log('─────────────────────────────────────────────');
+    console.log('─────────────────────────────────────────────────────────────────');
     console.log(
         padRight('  合计', 8) +
             padRight(String(modules.length), 10) +
             padRight(formatSize(totalSize), 14) +
-            '100.0%'
+            padRight('100.0%', 14) +
+            padRight(formatSize(totalGzipSize), 14) +
+            formatSize(totalBrotliSize)
     );
-    console.log('═══════════════════════════════════════════════\n');
+    console.log('═════════════════════════════════════════════════════════════════════\n');
 }
 
 /**

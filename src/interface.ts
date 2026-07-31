@@ -35,7 +35,7 @@ export interface Module {
     groups: Array<Module>;
 }
 
-interface AnalyzerOptions {
+export interface AnalyzerOptions {
     analyzerMode?: 'json' | 'static' | 'server'; // 不传则只输出终端表格
     fileName?: string; // JSON/HTML 文件名
     analyzerPort?: number; // server 模式端口

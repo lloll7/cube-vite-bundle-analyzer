@@ -4,6 +4,7 @@ import { AnalyzerOptions, Module } from './interface';
 import path from 'node:path';
 import { AnalyzerModule } from './analyzer-module';
 import { writeJsonReport } from './output/json';
+import { writeStaticHtmlReport } from './output/static-html';
 
 /** Vite/Rollup bundle item 的通用形状 */
 /**
@@ -143,6 +144,53 @@ function printTerminalSummary(modules: Module[]) {
 }
 
 /**
+ * 打印首屏入口资源体积：entry chunk + 与入口同名的同步 CSS。
+ * Vite 产物中 JS/CSS 文件名去掉 hash 后前缀相同，如 index-xxx.js ↔ index-yyy.css。
+ */
+function printEntrySummary(modules: Module[]) {
+    // 找出入口文件
+    const entryChunks = modules.filter((mod) => mod.isEntry && !mod.isAsset);
+    if (entryChunks.length === 0) return;
+
+    // 去掉扩展名和 Vite 的 8 位 hash
+    /**
+     * @description
+     * 例：
+     * assets/index-DIzJl3AY.js
+     * assets/index-GmK2cb7z.css
+     * 都会变为 assets/index
+     */
+    const toBaseName = (filename: string) =>
+        filename
+            .replace(/\.(?:c|m)?js$/i, '')
+            .replace(/\.css$/i, '')
+            .replace(/-[A-Za-z0-9_-]{8,}$/, '');
+
+    const entryBaseNames = new Set(entryChunks.map((mod) => toBaseName(mod.filename)));
+    /**
+     * 找出与入口同步加载的 CSS
+     * 条件依次是：它是 asset、是 .css 文件、并且去掉 hash 后和某个 entry JS 前缀相同。
+     * 异步加载（动态 import）的 CSS 一般前缀不同或不在 entry 集合里，所以不会被算进来
+     */
+    const syncCss = modules.filter(
+        (mod) =>
+            mod.isAsset &&
+            /\.css$/i.test(mod.filename) &&
+            entryBaseNames.has(toBaseName(mod.filename))
+    );
+
+    const firstScreenModules = [...entryChunks, ...syncCss];
+    const parsedSize = firstScreenModules.reduce((sum, mod) => sum + mod.parsedSize, 0);
+    const gzipSize = firstScreenModules.reduce((sum, mod) => sum + mod.gzipSize, 0);
+    const brotliSize = firstScreenModules.reduce((sum, mod) => sum + mod.brotliSize, 0);
+
+    console.log(`  首屏入口  ${entryChunks.length} JS + ${syncCss.length} CSS`);
+    console.log(
+        `    parsedSize: ${formatSize(parsedSize)}  |  gzipSize: ${formatSize(gzipSize)}  |  brotliSize: ${formatSize(brotliSize)}\n`
+    );
+}
+
+/**
  * bundleAnalyzer 插件的主要作用：
  *   - 用于分析 Vite 或 Rollup 打包输出目录的所有文件体积和类型分布，并在打包完成后打印出详细的体积分析报告。
  *
@@ -201,10 +249,17 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
 
             // 终端摘要
             printTerminalSummary(modules);
+            printEntrySummary(modules);
             
             // JSON 输出
             if (options.analyzerMode === 'json') {
                 const absPath = await writeJsonReport(modules, outDir, options.fileName ?? 'stats.json');
+                console.log(`  stats written → ${absPath}\n`);
+            }
+
+            // 静态 HTML 输出
+            if (options.analyzerMode === 'static') {
+                const absPath = await writeStaticHtmlReport(modules, outDir, options.fileName ?? 'stats.html');
                 console.log(`  stats written → ${absPath}\n`);
             }
         },

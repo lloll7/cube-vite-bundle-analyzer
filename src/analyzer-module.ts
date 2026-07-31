@@ -234,7 +234,7 @@ export class AnalyzerNode {
                     if (child.groups && child.groups.length) {
                         Object.assign(
                             child,
-                            child.groups.reduce((acc, cur) => {
+                            child.groups.reduce((acc: any, cur: any) => {
                                 acc.gzipSize += cur.gzipSize;
                                 acc.brotliSize += cur.brotliSize;
                                 acc.parsedSize += cur.parsedSize;

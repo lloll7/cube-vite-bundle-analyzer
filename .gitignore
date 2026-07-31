@@ -75,3 +75,7 @@ src/components.d.ts
 
 # vscode extension
 .history
+
+.edge-tmp
+.md
+

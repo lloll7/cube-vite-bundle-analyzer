@@ -5,6 +5,8 @@
   "scripts": {
     "demo:build": "vite build --config demo/vite.config.ts",
     "demo:dev": "vite --config demo/vite.config.ts",
+    "client:build": "npm --prefix client/cube-vite-bundle-analyzer-client run build",
+    "precompile": "npm run client:build && node --experimental-strip-types pre-compile.ts",
     "test": "npm run demo:build"
   },
   "author": "",

@@ -250,8 +250,16 @@ export async function writeStaticHtmlReport(
     outDir: string,
     fileName = 'stats.html'
 ): Promise<string> {
+    let html: string;
+    try {
+        const { renderView } = await import('../render');
+        html = await renderView(modules, { title: 'Bundle 分析报告', mode: 'parsedSize' });
+    } catch {
+        // 预编译模板不存在时退回简单静态报告
+        html = renderStaticHtml(modules);
+    }
     const absPath = path.isAbsolute(fileName) ? fileName : path.resolve(outDir, fileName);
     await mkdir(path.dirname(absPath), { recursive: true });
-    await writeFile(absPath, renderStaticHtml(modules), 'utf-8');
+    await writeFile(absPath, html, 'utf-8');
     return absPath;
 }

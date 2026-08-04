@@ -5,6 +5,7 @@ import path from 'node:path';
 import { AnalyzerModule } from './analyzer-module';
 import { writeJsonReport } from './output/json';
 import { writeStaticHtmlReport } from './output/static-html';
+import { EFileType } from './type/enum/EFileType';
 
 /** Vite/Rollup bundle item 的通用形状 */
 /**
@@ -36,11 +37,19 @@ function categorizeFile(fileName: string): string {
     const jsExts = new Set(['js', 'mjs', 'cjs']);
     const cssExts = new Set(['css']);
     const imgExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif']);
+    const fontExts = new Set(['woff', 'woff2', 'ttf', 'otf', 'eot']);
+    const mediaExts = new Set(['mp4', 'webm', 'mp3', 'wav']);
+    const jsonExts = new Set(['json', 'json5']);
+    const htmlExts = new Set(['html', 'htm']);
 
-    if (jsExts.has(ext)) return 'JS';
-    if (cssExts.has(ext)) return 'CSS';
-    if (imgExts.has(ext)) return '图片';
-    return '其他';
+    if (jsExts.has(ext)) return EFileType.JS;
+    if (cssExts.has(ext)) return EFileType.CSS;
+    if (imgExts.has(ext)) return EFileType.IMG;
+    if (fontExts.has(ext)) return EFileType.FONT_TYPE;
+    if (mediaExts.has(ext)) return EFileType.MEDIA;
+    if (jsonExts.has(ext)) return EFileType.JSON;
+    if (htmlExts.has(ext)) return EFileType.HTML;
+    return EFileType.OTHER;
 }
 /**
  * 格式化文件大小的显示
@@ -99,6 +108,10 @@ function printTerminalSummary(modules: Module[]) {
         JS: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
         CSS: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
         图片: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
+        字体: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
+        音视频: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
+        数据配置: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
+        网页: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
         其他: { count: 0, totalSize: 0, totalGzipSize: 0, totalBrotliSize: 0, files: [] },
     };
 
@@ -116,14 +129,21 @@ function printTerminalSummary(modules: Module[]) {
     console.log('\n══════════════════════════════════════════════════════════════════════════');
     console.log('  Bundle 分析报告');
     console.log('══════════════════════════════════════════════════════════════════════════');
-    console.log(padRight('  分类', 8) + padRight('文件数', 10) + padRight('大小', 14) + padRight('占比', 14) + padRight('gzipSize', 14) + 'brotliSize');
+    console.log(
+        padRight('  分类', 8) +
+            padRight('文件数', 10) +
+            padRight('大小', 14) +
+            padRight('占比', 14) +
+            padRight('gzipSize', 14) +
+            'brotliSize'
+    );
     console.log('─────────────────────────────────────────────────────────────────');
-    for (const cat of ['JS', 'CSS', '图片', '其他']) {
-        const info = categories[cat];
-        if (info.count === 0) continue;
+    for (const value of Object.values(EFileType)) {
+        const info = categories[value];
+        if (!info || info.count === 0) continue;
         const pct = ((info.totalSize / totalSize) * 100).toFixed(1);
         console.log(
-            padRight(`  ${cat}`, 8) +
+            padRight(`  ${value}`, 8) +
                 padRight(String(info.count), 10) +
                 padRight(formatSize(info.totalSize), 14) +
                 padRight(pct + '%', 14) +
@@ -219,7 +239,7 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
             /**
              * 强制开启 sourcemap ，没有 sourcemap 只能够知道 index.js 打包后有 120 kb，有了 sourcemap 可以知道这其中 loadsh 占了 42kb，util.ts 占了 20kb...
              * 它可以从打包产物追溯到源文件，这样才能进行模块化分析，否则都是空谈。
-             * 
+             *
              * 打包过程本质上是一个信息销毁的过程，而 sourcemap 在销毁开始前记录了一份快照，记录下来，打包完成后就可以根据这些快照来溯源
              * 在打包完成时这些快照就被编码为了 .map 文件
              */
@@ -227,7 +247,7 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
         },
 
         /** 读取最终构建输出目录 */
-        configResolved(config) { 
+        configResolved(config) {
             outDir = path.resolve(config.root, config.build.outDir ?? 'dist');
         },
         /**
@@ -250,22 +270,33 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
             // 终端摘要
             printTerminalSummary(modules);
             printEntrySummary(modules);
-            
+
             // JSON 输出
             if (options.analyzerMode === 'json') {
-                const absPath = await writeJsonReport(modules, outDir, options.fileName ?? 'stats.json');
+                const absPath = await writeJsonReport(
+                    modules,
+                    outDir,
+                    options.fileName ?? 'stats.json'
+                );
                 console.log(`  stats written → ${absPath}\n`);
             }
 
             // 静态 HTML 输出
             if (options.analyzerMode === 'static') {
-                const absPath = await writeStaticHtmlReport(modules, outDir, options.fileName ?? 'stats.html');
+                const absPath = await writeStaticHtmlReport(
+                    modules,
+                    outDir,
+                    options.fileName ?? 'stats.html'
+                );
                 console.log(`  stats written → ${absPath}\n`);
             }
 
             if (options.analyzerMode === 'server') {
                 const { startServer } = await import('./output/server');
-                await startServer(modules, { port: options.analyzerPort ?? 8888, openAnalyzer: options.openAnalyzer });
+                await startServer(modules, {
+                    port: options.analyzerPort ?? 8888,
+                    openAnalyzer: options.openAnalyzer,
+                });
             }
         },
     };

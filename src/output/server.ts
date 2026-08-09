@@ -1,6 +1,6 @@
 import http from 'node:http';
 import net from 'node:net';
-import { Module } from '../interface';
+import type { Module } from '../interface';
 import { renderStaticHtml } from './static-html';
 import { exec } from 'node:child_process';
 

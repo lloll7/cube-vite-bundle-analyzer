@@ -1,6 +1,4 @@
-import type { Plugin } from 'vite';
-import { Buffer } from 'node:buffer';
-import { AnalyzerOptions, Module } from './interface';
+import type { AnalyzerOptions, Module } from './interface';
 import path from 'node:path';
 import { AnalyzerModule } from './analyzer-module';
 import { writeJsonReport } from './output/json';
@@ -223,10 +221,23 @@ function printEntrySummary(modules: Module[]) {
  *     ]
  *   }
  */
-export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
+/**
+ * 与具体 Vite 版本解耦的最小插件类型。
+ * 本地直接 import TS 源码时，不会再把根目录 Vite/Rolldown 的类型带进使用方项目。
+ */
+export interface AnalyzerPlugin {
+    name: string;
+    apply: 'build';
+    enforce: 'post';
+    config(config: any): void;
+    configResolved(config: any): void;
+    generateBundle(options: any, outputBundle: any): Promise<void>;
+    closeBundle(): Promise<void>;
+}
+
+export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
     const analyzer = new AnalyzerModule();
     let outDir = 'dist';
-    let lastSourcemapOption: boolean | 'inline' | 'hidden' | undefined;
 
     return {
         name: 'vite-bundle-analyzer',
@@ -235,7 +246,6 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): Plugin {
 
         config(config) {
             if (!config.build) config.build = {};
-            lastSourcemapOption = config.build.sourcemap;
             /**
              * 强制开启 sourcemap ，没有 sourcemap 只能够知道 index.js 打包后有 120 kb，有了 sourcemap 可以知道这其中 loadsh 占了 42kb，util.ts 占了 20kb...
              * 它可以从打包产物追溯到源文件，这样才能进行模块化分析，否则都是空谈。

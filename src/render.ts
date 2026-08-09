@@ -1,4 +1,4 @@
-import { Module } from './interface';
+import type { Module } from './interface';
 
 export interface RenderOptions {
     title: string;

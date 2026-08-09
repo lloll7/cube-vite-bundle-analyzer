@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
-import { useStats } from './composables/useStats';
-import type { Category } from './types';
+import { useStats, type SourceMatch } from './composables/useStats';
+import type { Category, SourceFile } from './types';
 import Treemap from './components/Treemap.vue';
 import SummaryTable from './components/SummaryTable.vue';
 import FilterBar from './components/FilterBar.vue';
@@ -19,8 +19,10 @@ const {
     searchQuery,
     showEntryOnly,
     enabledCategories,
+    selectedSourcePath,
     load,
-    filteredModules,
+    filteredSourceFiles,
+    sourceMatches,
 } = useStats();
 
 onMounted(load);
@@ -33,6 +35,16 @@ function toggleCategory(category: Category) {
         next.add(category);
     }
     enabledCategories.value = next;
+}
+
+function selectSource(match: SourceMatch) {
+    selected.value = match.chunk;
+    selectedSourcePath.value = match.path;
+}
+
+function selectSourceFile(source: SourceFile) {
+    selected.value = source.chunk;
+    selectedSourcePath.value = source.path;
 }
 </script>
 
@@ -64,23 +76,31 @@ function toggleCategory(category: Category) {
             <div class="workspace">
                 <section class="treemap-panel">
                     <div class="panel-head">
-                        <span class="panel-title">产物体积树图</span>
-                        <span class="panel-hint">{{ filteredModules.length }} / {{ modules.length }}</span>
+                        <span class="panel-title">源文件体积树图</span>
+                        <span class="panel-hint">{{ filteredSourceFiles.length }} 个源文件</span>
                     </div>
                     <Treemap
-                        :modules="filteredModules"
+                        :items="filteredSourceFiles"
                         :dimension="dimension"
-                        @select="selected = $event"
+                        @select="selectSourceFile"
                     />
                 </section>
-                <DetailPanel :module="selected" :dimension="dimension" />
+                <DetailPanel
+                    :module="selected"
+                    :dimension="dimension"
+                    :highlight="selectedSourcePath"
+                />
             </div>
 
             <FileList
-                :modules="filteredModules"
+                :items="filteredSourceFiles"
                 :dimension="dimension"
                 :selected="selected"
-                @select="selected = $event"
+                :source-matches="sourceMatches"
+                :search-query="searchQuery"
+                :selected-source-path="selectedSourcePath"
+                @select-source-file="selectSourceFile"
+                @select-source="selectSource"
             />
         </div>
     </div>

@@ -1,23 +1,23 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
-import type { Dimension, Module } from '../types';
-import { CATEGORY_COLORS, categorizeFile, formatSize, getSize } from '../utils';
+import type { Dimension, SourceFile } from '../types';
+import { CATEGORY_COLORS, categorizeFile, formatSize } from '../utils';
 
 interface Box {
-    module: Module;
+    item: SourceFile;
     x: number;
     y: number;
     width: number;
     height: number;
 }
 
-const props = defineProps<{ modules: Module[]; dimension: Dimension }>();
-const emit = defineEmits<{ select: [module: Module] }>();
+const props = defineProps<{ items: SourceFile[]; dimension: Dimension }>();
+const emit = defineEmits<{ select: [item: SourceFile] }>();
 
 const containerRef = ref<HTMLElement | null>(null);
 const boxes = ref<Box[]>([]);
-const hovered = ref<Module | null>(null);
+const hovered = ref<SourceFile | null>(null);
 const viewWidth = ref(0);
 const viewHeight = ref(0);
 let observer: ResizeObserver | null = null;
@@ -43,18 +43,18 @@ function draw() {
     if (!measure() && boxes.value.length) {
         return;
     }
-    if (!props.modules.length || !viewWidth.value || !viewHeight.value) {
+    if (!props.items.length || !viewWidth.value || !viewHeight.value) {
         boxes.value = [];
         return;
     }
 
-    const data = { children: props.modules };
-    const root = hierarchy(data as unknown as Module, (d) => {
-        return (d as unknown as { children?: Module[] }).children ?? null;
+    const data = { children: props.items };
+    const root = hierarchy(data as unknown as SourceFile, (d) => {
+        return (d as unknown as { children?: SourceFile[] }).children ?? null;
     });
-    root.sum((d) => (d.parsedSize === undefined ? 0 : getSize(d, props.dimension)));
+    root.sum((d) => (d.parsedSize === undefined ? 0 : d[props.dimension]));
 
-    const layout = treemap<Module>()
+    const layout = treemap<SourceFile>()
         .size([viewWidth.value, viewHeight.value])
         .tile(treemapSquarify)
         .paddingOuter(3)
@@ -62,7 +62,7 @@ function draw() {
     const rectRoot = layout(root);
 
     boxes.value = rectRoot.leaves().map((node) => ({
-        module: node.data,
+        item: node.data,
         x: node.x0,
         y: node.y0,
         width: Math.max(0, node.x1 - node.x0),
@@ -70,8 +70,8 @@ function draw() {
     }));
 }
 
-function handleClick(module: Module) {
-    emit('select', module);
+function handleClick(item: SourceFile) {
+    emit('select', item);
 }
 
 onMounted(() => {
@@ -82,7 +82,7 @@ onMounted(() => {
 
 onUnmounted(() => observer?.disconnect());
 
-watch([() => props.modules, () => props.dimension], () => {
+watch([() => props.items, () => props.dimension], () => {
     lastWidth = 0;
     lastHeight = 0;
     draw();
@@ -91,18 +91,18 @@ watch([() => props.modules, () => props.dimension], () => {
 
 <template>
     <div ref="containerRef" class="treemap">
-        <svg :viewBox="`0 0 ${viewWidth} ${viewHeight}`" width="100%" height="100%" role="img" aria-label="产物体积树图">
-            <g v-for="(box, index) in boxes" :key="`${box.module.filename}-${index}`">
+        <svg :viewBox="`0 0 ${viewWidth} ${viewHeight}`" width="100%" height="100%" role="img" aria-label="源文件体积树图">
+            <g v-for="(box, index) in boxes" :key="`${box.item.path}-${index}`">
                 <rect
                     :x="box.x"
                     :y="box.y"
                     :width="box.width"
                     :height="box.height"
-                    :fill="CATEGORY_COLORS[categorizeFile(box.module.filename)]"
-                    :opacity="hovered === box.module ? 1 : 0.82"
-                    @mousemove="hovered = box.module"
+                    :fill="CATEGORY_COLORS[categorizeFile(box.item.path)]"
+                    :opacity="hovered === box.item ? 1 : 0.82"
+                    @mousemove="hovered = box.item"
                     @mouseleave="hovered = null"
-                    @click="handleClick(box.module)"
+                    @click="handleClick(box.item)"
                 />
                 <text
                     v-if="box.width > 64 && box.height > 30"
@@ -110,7 +110,7 @@ watch([() => props.modules, () => props.dimension], () => {
                     :y="box.y + 17"
                     class="cell-label"
                 >
-                    {{ box.module.label }}
+                    {{ box.item.path }}
                 </text>
                 <text
                     v-if="box.width > 120 && box.height > 52"
@@ -118,15 +118,15 @@ watch([() => props.modules, () => props.dimension], () => {
                     :y="box.y + 35"
                     class="cell-size"
                 >
-                    {{ formatSize(getSize(box.module, dimension)) }}
+                    {{ formatSize(box.item[dimension]) }}
                 </text>
             </g>
         </svg>
         <div v-if="hovered" class="hover-strip">
-            <span class="hover-name">{{ hovered.filename }}</span>
-            <span class="hover-size">{{ formatSize(getSize(hovered, dimension)) }}</span>
+            <span class="hover-name">{{ hovered.path }}</span>
+            <span class="hover-size">{{ formatSize(hovered[dimension]) }}</span>
         </div>
-        <div v-if="!boxes.length" class="empty-state">当前筛选条件下没有可展示的产物</div>
+        <div v-if="!boxes.length" class="empty-state">当前筛选条件下没有可展示的源文件</div>
     </div>
 </template>
 

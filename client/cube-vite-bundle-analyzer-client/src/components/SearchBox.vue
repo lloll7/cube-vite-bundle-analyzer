@@ -11,7 +11,7 @@ function onInput(event: Event) {
     <input
         class="search-box"
         type="search"
-        placeholder="搜索文件名"
+        placeholder="搜索源文件/文件夹名称"
         :value="modelValue"
         @input="onInput"
     />

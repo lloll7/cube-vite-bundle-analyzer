@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { GroupWithNode } from '../trie';
-import { Module } from '../interface';
+import type { GroupWithNode } from '../trie';
+import type { Module } from '../interface';
 
 /** HTML 转义，防止文件名/路径中的 < > & 等字符破坏页面结构 */
 function escapeHtml(str: string): string {

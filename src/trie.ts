@@ -12,8 +12,8 @@ interface NodeDescriptor<T = Record<string, NonNullable<unknown>>> {
 }
 
 interface NodeVisitor<T> {
-    enter?: (node, parent, isEndOfPath) => void;
-    leave?: (node, parent, isEndOfPath) => void;
+    enter?: (node: GroupWithNode, parent?: Node<T>, isEndOfPath?: boolean) => void;
+    leave?: (node: GroupWithNode, parent?: Node<T>, isEndOfPath?: boolean) => void;
 }
 
 export class Node<T = NonNullable<unknown>> implements NodeDescriptor<T> {

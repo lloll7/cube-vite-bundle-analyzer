@@ -22,6 +22,15 @@ export interface Module {
     groups?: GroupWithNode[];
 }
 
+export interface SourceFile {
+    path: string;
+    parsedSize: number;
+    gzipSize: number;
+    brotliSize: number;
+    chunk: Module;
+    chunkCount: number;
+}
+
 export type Dimension = 'parsedSize' | 'gzipSize' | 'brotliSize';
 
 export type Category = 'JS' | 'CSS' | '图片' | '字体' | '音视频' | '数据配置' | '网页' | '其他';

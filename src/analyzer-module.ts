@@ -1,4 +1,4 @@
-import { BrotliOptions, ZlibOptions } from 'zlib';
+import type { BrotliOptions, ZlibOptions } from 'zlib';
 import type {
     Module,
     OutputAsset,
@@ -7,7 +7,7 @@ import type {
     PathFormatter,
     PluginContext,
 } from './interface.ts';
-import { FilterPattern } from 'vite';
+import type { FilterPattern } from 'vite';
 import { byteToString, createBrotil, createGzip, stringToByte } from './shared.ts';
 import { Trie } from './trie.ts';
 import type { GroupWithNode } from './trie.ts'
@@ -18,6 +18,7 @@ import { pickupMappingsFromCodeStr } from './source-map.ts';
 interface SerializedModWithAsset {
     code: string;
     filename: string;
+    label: string;
     kind: 'asset';
 }
 
@@ -70,9 +71,15 @@ function findSourcemap(fileName: string, sourcemapFileName: string, chunks: Outp
 function serializedMod(mod: OutputChunk | OutputAsset, chunks: OutputBundle): SerializedMod {
     // 非 JS asset（如 .css）无需 source map 分析
     if (mod.type === 'asset' && !JS_EXTENSIONS.test(mod.fileName)) {
+        const sourceLabel =
+            mod.originalFileName ??
+            mod.originalFileNames?.[0] ??
+            mod.names?.[0] ??
+            mod.fileName;
         return <SerializedModWithAsset>{
             code: mod.source,
             filename: mod.fileName,
+            label: sourceLabel,
             kind: 'asset', // 标记为非 JS asset
         };
     }
@@ -174,13 +181,14 @@ export class AnalyzerNode {
     async setup(
         mod: SerializedMod,
         compress: ReturnType<typeof createCompressAlorithm>,
-        worksapceRoot: string,
-        matcher: ReturnType<typeof createFilter>,
-        pathFormatter: PathFormatter
+        _worksapceRoot: string,
+        _matcher: ReturnType<typeof createFilter>,
+        _pathFormatter: PathFormatter
     ) {
         if (mod.kind === 'asset') {
             const code = stringToByte(mod.code);
             this.parsedSize = code.byteLength;
+            this.label = mod.label;
             const { brotliSize, gzipSize } = await calcCompressedSize(code, compress);
             this.brotliSize = brotliSize;
             this.gzipSize = gzipSize;
@@ -206,7 +214,7 @@ export class AnalyzerNode {
              * 可用于进一步分析代码来源和体积归属
              */
             if (map) {
-                const { grouped, files } = pickupMappingsFromCodeStr(s, map);
+                const { grouped } = pickupMappingsFromCodeStr(s, map);
                 // 并行：为每个源文件计算体积并插入 Trie
                 await Promise.all(
                     Object.entries(grouped).map(async ([id, { code: sourceCode }]) => {
@@ -230,7 +238,7 @@ export class AnalyzerNode {
                         parent.groups.push(child);
                     }
                 },
-                leave: (child, _parent, end) => {
+                leave: (child, _parent) => {
                     if (child.groups && child.groups.length) {
                         Object.assign(
                             child,

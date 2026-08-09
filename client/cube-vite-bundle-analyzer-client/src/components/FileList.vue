@@ -1,34 +1,95 @@
 <script setup lang="ts">
-import type { Dimension, Module } from '../types';
-import { CATEGORY_COLORS, categorizeFile, formatSize, getSize } from '../utils';
+import { computed } from 'vue';
+import type { SourceMatch } from '../composables/useStats';
+import type { Dimension, Module, SourceFile } from '../types';
+import { CATEGORY_COLORS, categorizeFile, formatSize } from '../utils';
 
-defineProps<{ modules: Module[]; dimension: Dimension; selected: Module | null }>();
-const emit = defineEmits<{ select: [module: Module] }>();
+const props = defineProps<{
+    items: SourceFile[];
+    dimension: Dimension;
+    selected: Module | null;
+    sourceMatches?: SourceMatch[];
+    searchQuery?: string;
+    selectedSourcePath?: string;
+}>();
+
+function sourceSize(match: SourceMatch, dimension: Dimension): number {
+    return match[dimension];
+}
+
+function sourceFileSize(item: SourceFile, dimension: Dimension): number {
+    return item[dimension];
+}
+
+function isMatchActive(match: SourceMatch): boolean {
+    return (
+        props.selected?.filename === match.chunk.filename &&
+        props.selectedSourcePath === match.path
+    );
+}
+
+function isSourceFileActive(item: SourceFile): boolean {
+    return (
+        props.selected?.filename === item.chunk.filename &&
+        props.selectedSourcePath === item.path
+    );
+}
+
+const hasSourceSearch = computed(() => Boolean(props.searchQuery?.trim() && props.sourceMatches));
+
+const emit = defineEmits<{
+    selectSource: [match: SourceMatch];
+    selectSourceFile: [item: SourceFile];
+}>();
 </script>
 
 <template>
     <section class="file-list-panel">
         <div class="panel-head">
-            <span class="panel-title">产物列表</span>
-            <span class="panel-count">{{ modules.length }}</span>
+            <span class="panel-title">{{ hasSourceSearch ? '源文件/目录搜索结果' : '源文件列表' }}</span>
+            <span class="panel-count">{{ hasSourceSearch ? sourceMatches?.length ?? 0 : items.length }}</span>
         </div>
-        <div v-if="!modules.length" class="file-empty">当前筛选条件下没有产物</div>
-        <div v-else class="file-grid">
+        <div v-if="hasSourceSearch && !sourceMatches?.length" class="file-empty">
+            未找到匹配的源文件或目录
+        </div>
+        <div v-else-if="hasSourceSearch" class="file-grid source-grid">
             <button
-                v-for="mod in modules"
-                :key="mod.filename"
+                v-for="match in sourceMatches"
+                :key="`${match.chunk.filename}-${match.path}`"
                 type="button"
-                class="file-item"
-                :class="{ active: selected?.filename === mod.filename }"
-                @click="emit('select', mod)"
+                class="file-item source-item"
+                :class="{ active: isMatchActive(match) }"
+                @click="emit('selectSource', match)"
             >
                 <span
                     class="file-dot"
-                    :style="{ background: CATEGORY_COLORS[categorizeFile(mod.filename)] }"
+                    :style="{ background: CATEGORY_COLORS[categorizeFile(match.path)] }"
                 ></span>
-                <span class="file-name">{{ mod.label }}</span>
-                <span v-if="mod.isEntry" class="file-entry">ENTRY</span>
-                <span class="file-size">{{ formatSize(getSize(mod, dimension)) }}</span>
+                <span class="source-main">
+                    <span class="source-path">{{ match.path }}</span>
+                    <span class="source-chunk">位于 {{ match.chunk.label || match.chunk.filename }}</span>
+                </span>
+                <span v-if="match.isDirectory" class="source-badge">目录</span>
+                <span class="file-size">{{ formatSize(sourceSize(match, dimension)) }}</span>
+            </button>
+        </div>
+        <div v-else-if="!items.length" class="file-empty">当前筛选条件下没有源文件</div>
+        <div v-else class="file-grid">
+            <button
+                v-for="item in items"
+                :key="item.path"
+                type="button"
+                class="file-item"
+                :class="{ active: isSourceFileActive(item) }"
+                @click="emit('selectSourceFile', item)"
+            >
+                <span
+                    class="file-dot"
+                    :style="{ background: CATEGORY_COLORS[categorizeFile(item.path)] }"
+                ></span>
+                <span class="file-name">{{ item.path }}</span>
+                <span v-if="item.chunkCount > 1" class="source-badge">x{{ item.chunkCount }}</span>
+                <span class="file-size">{{ formatSize(sourceFileSize(item, dimension)) }}</span>
             </button>
         </div>
     </section>
@@ -69,6 +130,9 @@ const emit = defineEmits<{ select: [module: Module] }>();
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 8px;
 }
+.source-grid {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
 .file-item {
     display: flex;
     align-items: center;
@@ -88,6 +152,38 @@ const emit = defineEmits<{ select: [module: Module] }>();
 .file-item.active {
     border-color: var(--accent);
     background: var(--accent-soft);
+}
+.source-item {
+    align-items: flex-start;
+}
+.source-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.source-path {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.source-chunk {
+    font-size: 11px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.source-badge {
+    flex-shrink: 0;
+    font-size: 9px;
+    font-weight: 700;
+    color: #7c3aed;
+    background: #ede9fe;
+    border-radius: 999px;
+    padding: 2px 6px;
 }
 .file-dot {
     width: 8px;

@@ -13,13 +13,13 @@ export const CATEGORIES: Category[] = [
 
 export const CATEGORY_COLORS: Record<Category, string> = {
     JS: '#2563eb',
-    CSS: '#059669',
-    图片: '#d97706',
-    字体: '#7c3aed',
-    音视频: '#dc2626',
-    数据配置: '#0891b2',
-    网页: '#92400e',
-    其他: '#64748b',
+    CSS: '#10b981',
+    图片: '#06b6d4',
+    字体: '#8b5cf6',
+    音视频: '#f43f5e',
+    数据配置: '#14b8a6',
+    网页: '#f59e0b',
+    其他: '#94a3b8',
 };
 
 export function categorizeFile(fileName: string): Category {

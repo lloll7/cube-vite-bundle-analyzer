@@ -10,6 +10,11 @@ const props = defineProps<{
     highlight?: string;
 }>();
 
+const emit = defineEmits<{
+    backTo: [path: string];
+    selectSource: [path: string];
+}>();
+
 function findNode(nodes: GroupWithNode[], target: string): GroupWithNode | null {
     for (const node of nodes) {
         if (node.filename === target || node.label === target) return node;
@@ -36,6 +41,13 @@ const activeSizes = computed(() => {
 });
 
 const activeSize = computed(() => activeSizes.value[props.dimension]);
+
+function handleBack() {
+    const path = props.highlight ?? '';
+    const normalized = path.replace(/\\/g, '/');
+    const parentIndex = normalized.lastIndexOf('/');
+    emit('backTo', parentIndex <= 0 ? '' : normalized.slice(0, parentIndex));
+}
 </script>
 
 <template>
@@ -45,6 +57,7 @@ const activeSize = computed(() => activeSizes.value[props.dimension]);
             <div class="detail-head">
                 <div class="detail-name">{{ highlight || module.label }}</div>
                 <div class="detail-badges">
+                    <button v-if="highlight" type="button" class="back-button" @click="handleBack">返回上级</button>
                     <span v-if="highlight" class="badge source">SOURCE</span>
                     <span v-if="module.isEntry" class="badge entry">ENTRY</span>
                     <span v-if="module.isAsset" class="badge asset">ASSET</span>
@@ -87,6 +100,7 @@ const activeSize = computed(() => activeSizes.value[props.dimension]);
                         :nodes="module.source"
                         :dimension="dimension"
                         :highlight="highlight"
+                        @select="emit('selectSource', $event)"
                     />
                 </div>
                 <div v-else class="section-empty">无 source 子模块</div>
@@ -127,6 +141,8 @@ const activeSize = computed(() => activeSizes.value[props.dimension]);
 }
 .detail-badges {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 6px;
     flex-shrink: 0;
 }
@@ -135,6 +151,21 @@ const activeSize = computed(() => activeSizes.value[props.dimension]);
     font-weight: 700;
     padding: 2px 8px;
     border-radius: 999px;
+}
+.back-button {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #ffffff;
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.back-button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
 }
 .badge.entry {
     color: #1d4ed8;

@@ -46,6 +46,14 @@ function selectSourceFile(source: SourceFile) {
     selected.value = source.chunk;
     selectedSourcePath.value = source.path;
 }
+
+function selectSourcePath(path: string) {
+    selectedSourcePath.value = path;
+}
+
+function backToSourcePath(path: string) {
+    selectedSourcePath.value = path;
+}
 </script>
 
 <template>
@@ -89,6 +97,8 @@ function selectSourceFile(source: SourceFile) {
                     :module="selected"
                     :dimension="dimension"
                     :highlight="selectedSourcePath"
+                    @select-source="selectSourcePath"
+                    @back-to="backToSourcePath"
                 />
             </div>
 
@@ -176,9 +186,11 @@ h1 {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 560px;
 }
 .treemap-panel :deep(.treemap) {
     flex: 1;
+    min-height: 560px;
 }
 .panel-head {
     display: flex;
@@ -199,6 +211,8 @@ h1 {
 @media (max-width: 900px) {
     .workspace {
         grid-template-columns: 1fr;
+        height: auto;
+        min-height: 0;
     }
     .content {
         padding: 12px;

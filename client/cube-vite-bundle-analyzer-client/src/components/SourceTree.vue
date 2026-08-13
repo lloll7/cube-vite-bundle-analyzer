@@ -10,8 +10,14 @@ const props = defineProps<{
     highlight?: string;
 }>();
 
+const emit = defineEmits<{ select: [path: string] }>();
+
 function nodeSize(node: GroupWithNode, dimension: Dimension): number {
     return (node[dimension] as number | undefined) ?? 0;
+}
+
+function selectNode(node: GroupWithNode) {
+    emit('select', node.filename ?? node.label ?? '');
 }
 
 function isNodeActive(node: GroupWithNode): boolean {
@@ -38,17 +44,23 @@ function shouldOpen(node: GroupWithNode): boolean {
                 class="tree-node"
                 :open="shouldOpen(node)"
             >
-                <summary :class="{ highlighted: isNodeActive(node) }">
+                <summary :class="{ highlighted: isNodeActive(node) }" @click="selectNode(node)">
                     <span class="tree-label">{{ node.label || node.filename }}</span>
                     <span class="tree-path">{{ node.filename }}</span>
                     <span class="tree-size">{{ formatSize(nodeSize(node, dimension)) }}</span>
                 </summary>
-                <SourceTree :nodes="node.groups" :dimension="dimension" :highlight="highlight" />
+                <SourceTree
+                    :nodes="node.groups"
+                    :dimension="dimension"
+                    :highlight="highlight"
+                    @select="emit('select', $event)"
+                />
             </details>
             <div
                 v-else
                 class="tree-node tree-leaf"
                 :class="{ highlighted: isNodeActive(node) }"
+                @click="selectNode(node)"
             >
                 <span class="tree-label">{{ node.label || node.filename }}</span>
                 <span class="tree-path">{{ node.filename }}</span>

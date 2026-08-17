@@ -195,13 +195,9 @@ function draw() {
     const root = hierarchy(data as unknown as TreemapNode, (d) =>
         d.children.length ? d.children : null
     );
-    root.eachAfter((node) => {
-        if (node.children?.length) {
-            node.value = node.children.reduce((sum, child) => sum + (child.value ?? 0), 0);
-        } else {
-            node.value = Math.sqrt(Math.max(0, node.data[props.dimension] ?? 0));
-        }
-    });
+    root.sum((d) =>
+        d.children.length ? 0 : Math.sqrt(Math.max(0, d[props.dimension] ?? 0))
+    );
 
     const layout = treemap<TreemapNode>()
         .size([viewWidth.value, viewHeight.value])

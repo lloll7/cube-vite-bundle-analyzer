@@ -9,7 +9,8 @@
     "u:dev": "vite --config cube-zigbee-bridge-ultra-web/vite.config.ts",
     "client:build": "npm --prefix client/cube-vite-bundle-analyzer-client run build",
     "precompile": "npm run client:build && node --experimental-strip-types pre-compile.ts",
-    "test": "npm run demo:build"
+    "test": "vitest run",
+    "test:demo": "vite build --config demo/vite.config.ts"
   },
   "author": "",
   "license": "ISC",

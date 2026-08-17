@@ -8,11 +8,11 @@ import type {
     PluginContext,
 } from './interface.ts';
 import type { FilterPattern } from 'vite';
-import { byteToString, createBrotil, createGzip, stringToByte } from './shared.ts';
+import { createBrotil, createGzip, stringToByte } from './shared.ts';
 import { Trie } from './trie.ts';
 import type { GroupWithNode } from './trie.ts'
 import { createFilter } from '@rollup/pluginutils';
-import { pickupMappingsFromCodeStr } from './source-map.ts';
+import { normalizeSourcePath, pickupSourcesFromSourcemap } from './source-map.ts';
 
 /** 序列化后的非 JS asset（如 CSS、图片等） */
 interface SerializedModWithAsset {
@@ -140,9 +140,17 @@ function isSoucemap(filename: string) {
     return filename.slice(-3) === 'map';
 }
 
-function cleanPath(id: string): string {
-    return id.replace(/^((\.\.\/)+|(\.\.\\)+)/, '');
+/** 二进制资源（图片/音视频/字体等）不再计算 gzip/brotli，压缩结果没有实际参考价值 */
+const TEXT_ASSET_EXTENSIONS = new Set([
+    'js', 'mjs', 'cjs', 'css', 'html', 'htm', 'json', 'json5',
+    'svg', 'txt', 'xml', 'ts', 'tsx', 'jsx', 'vue',
+]);
+
+function isTextAsset(filename: string): boolean {
+    const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+    return TEXT_ASSET_EXTENSIONS.has(ext);
 }
+
 export class AnalyzerNode {
     /** Rollup 原始 id / 输出文件名 */
     originalId: string;
@@ -189,9 +197,11 @@ export class AnalyzerNode {
             const code = stringToByte(mod.code);
             this.parsedSize = code.byteLength;
             this.label = mod.label;
-            const { brotliSize, gzipSize } = await calcCompressedSize(code, compress);
-            this.brotliSize = brotliSize;
-            this.gzipSize = gzipSize;
+            if (isTextAsset(mod.filename)) {
+                const { brotliSize, gzipSize } = await calcCompressedSize(code, compress);
+                this.brotliSize = brotliSize;
+                this.gzipSize = gzipSize;
+            }
         } else {
             const sources = new Trie<{
                 parsedSize: number,
@@ -203,25 +213,30 @@ export class AnalyzerNode {
 
             this.addImports(...imports, ...dynamicImports);
             this.isAsset = false;
-            this.mapSize = map.length;
             this.isEntry = mod.isEntry;
 
-            // code 可能是 Uint8Array，统一转为 string 供 source map 解析
-            const s = byteToString(code);
+            // chunk 体积必须用产物本身的实际字节数，而不是 source 子树的累加值
+            const chunkBytes = stringToByte(code);
+            this.parsedSize = chunkBytes.byteLength;
+            const { gzipSize, brotliSize } = await calcCompressedSize(chunkBytes, compress);
+            this.gzipSize = gzipSize;
+            this.brotliSize = brotliSize;
+            this.mapSize = stringToByte(map).byteLength;
 
             /**
-             * map 存在代表该模块是一个 JS chunk，并且包含 source map（用于还原源码和映射关系），
-             * 可用于进一步分析代码来源和体积归属
+             * source 树仅用于体积归因展示，使用 source map 自带的 sourcesContent
+             * 计算每个源文件的原始体积，不再覆盖 chunk 自身的体积。
              */
             if (map) {
-                const { grouped } = pickupMappingsFromCodeStr(s, map);
+                const sourceFiles = pickupSourcesFromSourcemap(map);
                 // 并行：为每个源文件计算体积并插入 Trie
                 await Promise.all(
-                    Object.entries(grouped).map(async ([id, { code: sourceCode }]) => {
+                    sourceFiles.map(async ({ id, code: sourceCode }) => {
+                        if (sourceCode == null) return;
                         const b = stringToByte(sourceCode);
                         const parsedSize = b.byteLength;
                         const { brotliSize, gzipSize } = await calcCompressedSize(b, compress);
-                        sources.insert(cleanPath(id), {
+                        sources.insert(normalizeSourcePath(id), {
                             meta: { parsedSize, gzipSize, brotliSize }
                         });
                     })
@@ -254,13 +269,6 @@ export class AnalyzerNode {
             });
 
             this.source = sources.root.groups;
-
-            // 把 source 子树体积汇总到 chunk 节点本身
-            for (const s of this.source) {
-                this.gzipSize += s.gzipSize;
-                this.brotliSize += s.brotliSize;
-                this.parsedSize += s.parsedSize;
-            }
         }
     }
 }

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
-import type { Module } from '../interface';
-import { renderStaticHtml } from './static-html';
+import type { Module } from '../interface.ts';
+import { renderStaticHtml } from './static-html.ts';
 import { exec } from 'node:child_process';
 
 /** 探测端口是否可用；返回 true 表示可以监听 */
@@ -35,7 +35,7 @@ export async function startServer(modules: Module[], options?: { port?: number, 
         if (url.pathname === '/' || url.pathname === '/index.html') {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             try {
-                const { renderView } = await import('../render');
+                const { renderView } = await import('../render.ts');
                 const html = await renderView(modules, { title: 'Bundle 分析报告', mode: 'parsedSize' });
                 res.end(html);
             } catch {

@@ -1,9 +1,9 @@
-import type { AnalyzerOptions, Module } from './interface';
+import type { AnalyzerOptions, Module } from './interface.ts';
 import path from 'node:path';
-import { AnalyzerModule } from './analyzer-module';
-import { writeJsonReport } from './output/json';
-import { writeStaticHtmlReport } from './output/static-html';
-import { EFileType } from './type/enum/EFileType';
+import { AnalyzerModule } from './analyzer-module.ts';
+import { writeJsonReport } from './output/json.ts';
+import { writeStaticHtmlReport } from './output/static-html.ts';
+import { EFileType } from './type/enum/EFileType.ts';
 
 /** Vite/Rollup bundle item 的通用形状 */
 /**
@@ -314,7 +314,7 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
             }
 
             if (analyzerMode === 'server') {
-                const { startServer } = await import('./output/server');
+                const { startServer } = await import('./output/server.ts');
                 await startServer(modules, {
                     port: options.analyzerPort ?? 8888,
                     openAnalyzer: options.openAnalyzer,

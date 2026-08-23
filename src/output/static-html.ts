@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import type { GroupWithNode } from '../trie';
-import type { Module } from '../interface';
+import type { GroupWithNode } from '../trie.ts';
+import type { Module } from '../interface.ts';
 
 /** HTML 转义，防止文件名/路径中的 < > & 等字符破坏页面结构 */
 function escapeHtml(str: string): string {
@@ -252,7 +252,7 @@ export async function writeStaticHtmlReport(
 ): Promise<string> {
     let html: string;
     try {
-        const { renderView } = await import('../render');
+        const { renderView } = await import('../render.ts');
         html = await renderView(modules, { title: 'Bundle 分析报告', mode: 'parsedSize' });
     } catch {
         // 预编译模板不存在时退回简单静态报告

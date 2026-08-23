@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Module } from '../interface';
+import type { Module } from '../interface.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 
 export async function writeJsonReport(

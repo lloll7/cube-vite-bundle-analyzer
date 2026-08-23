@@ -236,7 +236,11 @@ export interface AnalyzerPlugin {
 }
 
 export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
-    const analyzer = new AnalyzerModule();
+    const analyzer = new AnalyzerModule({
+        include: options.include,
+        exclude: options.exclude,
+        pathFormatter: options.pathFormatter,
+    });
     let outDir = 'dist';
 
     return {

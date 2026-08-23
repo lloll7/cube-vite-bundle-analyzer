@@ -209,7 +209,7 @@ export class AnalyzerNode {
     async setup(
         mod: SerializedMod,
         compress: ReturnType<typeof createCompressAlorithm>,
-        _worksapceRoot: string,
+        _workspaceRoot: string,
         _matcher: ReturnType<typeof createFilter>,
         _pathFormatter: PathFormatter
     ) {
@@ -255,7 +255,8 @@ export class AnalyzerNode {
                     const b = stringToByte(sourceCode);
                     const parsedSize = b.byteLength;
                     const { brotliSize, gzipSize } = await calcCompressedSize(b, compress);
-                    sources.insert(normalizeSourcePath(id), {
+                    const displayPath = _pathFormatter(id, _workspaceRoot);
+                    sources.insert(normalizeSourcePath(displayPath), {
                         meta: { parsedSize, gzipSize, brotliSize }
                     });
                 });

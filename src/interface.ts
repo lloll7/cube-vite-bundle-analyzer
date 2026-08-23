@@ -42,6 +42,7 @@ export interface AnalyzerOptions {
     openAnalyzer?: boolean; // server 模式是否自动打开浏览器
     include?: FilterPattern; // 文件过滤
     exclude?: FilterPattern;
+    pathFormatter?: PathFormatter; // 自定义展示路径格式化
 }
 
 export type PathFormatter = (path: string, defaultWD: string) => string;

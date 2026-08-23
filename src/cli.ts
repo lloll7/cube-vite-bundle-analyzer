@@ -1,8 +1,7 @@
 /**
- * 命令行入口：解析参数后调用 vite build，并自动注入 bundleAnalyzer 插件。
- * 支持 npm run analyze -- -m json 这种用法，也可以直接用 node 执行本文件。
+ * CLI 参数解析与插件选项转换，供 cli-bin.ts（可执行入口）复用。
+ * 本文件不包含直接执行逻辑，便于单测 import。
  */
-import { pathToFileURL } from 'node:url';
 import { build } from 'vite';
 import { bundleAnalyzer } from './index.ts';
 import type { AnalyzerOptions } from './interface.ts';
@@ -101,18 +100,10 @@ export function createAnalyzerOptions(options: CliOptions): AnalyzerOptions {
 }
 
 /** CLI 主流程：解析参数 -> 注入插件 -> 执行一次 vite build */
-async function main() {
+export async function main() {
     const options = parseCliArgs(process.argv.slice(2));
     await build({
         configFile: options.configFile,
         plugins: [bundleAnalyzer(createAnalyzerOptions(options))],
-    });
-}
-
-/** 只有直接运行 cli.ts 时才执行主流程，被 import 时（如单测）不触发构建 */
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    main().catch((error) => {
-        console.error(error);
-        process.exitCode = 1;
     });
 }

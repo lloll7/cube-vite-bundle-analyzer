@@ -1,4 +1,6 @@
 import type { BrotliOptions, ZlibOptions } from 'zlib';
+import path from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
 import type {
     Module,
     OutputAsset,
@@ -343,6 +345,38 @@ export class AnalyzerModule {
             this.pathFormatter
         );
         this.modules.push(node);
+    }
+    /**
+     * 产物落盘后按磁盘真实文件刷新 JS chunk 体积。
+     * Vite 可能在 generateBundle 之后才向入口 chunk 追加 modulepreload 等代码，
+     * 导致内存中的 code 与磁盘文件不一致，这里以磁盘为准。
+     */
+    async refreshChunkSizesFromDisk(outDir: string) {
+        await mapLimit(this.modules, 8, async (node) => {
+            if (node.isAsset) return;
+            const filePath = path.join(outDir, node.filename);
+            try {
+                const fileStat = await stat(filePath);
+                if (fileStat.size !== node.parsedSize) {
+                    const bytes = new Uint8Array(await readFile(filePath));
+                    node.parsedSize = bytes.byteLength;
+                    const { gzipSize, brotliSize } = await calcCompressedSize(
+                        bytes,
+                        this.compressAlorithm
+                    );
+                    node.gzipSize = gzipSize;
+                    node.brotliSize = brotliSize;
+                }
+                const mapPath = `${filePath}.map`;
+                try {
+                    node.mapSize = (await stat(mapPath)).size;
+                } catch {
+                    // 没有 map 文件时保留 generateBundle 阶段的值
+                }
+            } catch {
+                // 文件未落盘或已删除时保留 generateBundle 阶段的值
+            }
+        });
     }
     /**
      * 导出最终 Module[] 供 UI / JSON / 自定义 analyzerMode 使用。

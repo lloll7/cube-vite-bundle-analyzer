@@ -274,15 +274,21 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
         },
         /** Vite 和 Rollup 在打包流程完成后自动调用的钩子函数（callback），用于在所有文件输出后做最终处理或统计分析。 */
         async closeBundle() {
+            // 落盘后以磁盘真实文件为准，避免 Vite 在 generateBundle 之后追加代码导致体积偏差
+            await analyzer.refreshChunkSizesFromDisk(outDir);
+
             const modules = analyzer.processModule();
             if (modules.length === 0) return;
+
+            // 允许 CI/测试通过环境变量覆盖输出模式，避免 server 模式挂起进程
+            const analyzerMode = process.env.ANALYZER_MODE ?? options.analyzerMode;
 
             // 终端摘要
             printTerminalSummary(modules);
             printEntrySummary(modules);
 
             // JSON 输出
-            if (options.analyzerMode === 'json') {
+            if (analyzerMode === 'json') {
                 const absPath = await writeJsonReport(
                     modules,
                     outDir,
@@ -292,7 +298,7 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
             }
 
             // 静态 HTML 输出
-            if (options.analyzerMode === 'static') {
+            if (analyzerMode === 'static') {
                 const absPath = await writeStaticHtmlReport(
                     modules,
                     outDir,
@@ -301,7 +307,7 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
                 console.log(`  stats written → ${absPath}\n`);
             }
 
-            if (options.analyzerMode === 'server') {
+            if (analyzerMode === 'server') {
                 const { startServer } = await import('./output/server');
                 await startServer(modules, {
                     port: options.analyzerPort ?? 8888,

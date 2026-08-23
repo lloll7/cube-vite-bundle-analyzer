@@ -10,7 +10,7 @@
     "client:build": "npm --prefix client/cube-vite-bundle-analyzer-client run build",
     "precompile": "npm run client:build && node --experimental-strip-types pre-compile.ts",
     "test": "vitest run",
-    "test:demo": "vite build --config demo/vite.config.ts"
+    "test:real": "set ANALYZER_MODE=json&& cd cube-zigbee-bridge-ultra-web && npm run build"
   },
   "author": "",
   "license": "ISC",

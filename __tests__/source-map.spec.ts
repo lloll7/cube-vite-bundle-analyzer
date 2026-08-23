@@ -19,6 +19,12 @@ describe('pickupSourcesFromSourcemap', () => {
     it('returns an empty list for invalid JSON', () => {
         expect(pickupSourcesFromSourcemap('not-json')).toEqual([]);
     });
+
+    it('returns an empty list when sources fields are not arrays', () => {
+        expect(
+            pickupSourcesFromSourcemap(JSON.stringify({ version: 3, sources: 'oops' }))
+        ).toEqual([]);
+    });
 });
 
 describe('normalizeSourcePath', () => {

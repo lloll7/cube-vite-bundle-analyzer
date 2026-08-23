@@ -27,8 +27,8 @@ export function pickupSourcesFromSourcemap(rawSourcemap: string) {
     } catch {
         return [];
     }
-    const sources = parsed.sources ?? [];
-    const contents = parsed.sourcesContent ?? [];
+    const sources = Array.isArray(parsed.sources) ? parsed.sources : [];
+    const contents = Array.isArray(parsed.sourcesContent) ? parsed.sourcesContent : [];
     return sources.map((id, index) => ({
         id,
         code: contents[index] ?? null,

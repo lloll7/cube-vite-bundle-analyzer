@@ -136,6 +136,24 @@ async function calcCompressedSize(
     return { gzipSize, brotliSize };
 }
 
+/** 有界并发执行异步任务，避免大项目一次性创建上千个压缩任务导致内存/CPU 峰值过高 */
+async function mapLimit<T, R>(
+    items: T[],
+    limit: number,
+    fn: (item: T) => Promise<R>
+): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let index = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (index < items.length) {
+            const current = index++;
+            results[current] = await fn(items[current]);
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
+
 function isSoucemap(filename: string) {
     return filename.slice(-3) === 'map';
 }
@@ -229,18 +247,16 @@ export class AnalyzerNode {
              */
             if (map) {
                 const sourceFiles = pickupSourcesFromSourcemap(map);
-                // 并行：为每个源文件计算体积并插入 Trie
-                await Promise.all(
-                    sourceFiles.map(async ({ id, code: sourceCode }) => {
-                        if (sourceCode == null) return;
-                        const b = stringToByte(sourceCode);
-                        const parsedSize = b.byteLength;
-                        const { brotliSize, gzipSize } = await calcCompressedSize(b, compress);
-                        sources.insert(normalizeSourcePath(id), {
-                            meta: { parsedSize, gzipSize, brotliSize }
-                        });
-                    })
-                );
+                // 为每个源文件计算体积并插入 Trie，压缩任务限制并发数
+                await mapLimit(sourceFiles, 8, async ({ id, code: sourceCode }) => {
+                    if (sourceCode == null) return;
+                    const b = stringToByte(sourceCode);
+                    const parsedSize = b.byteLength;
+                    const { brotliSize, gzipSize } = await calcCompressedSize(b, compress);
+                    sources.insert(normalizeSourcePath(id), {
+                        meta: { parsedSize, gzipSize, brotliSize }
+                    });
+                });
             }
 
             // 合并单子目录路径，简化树结构

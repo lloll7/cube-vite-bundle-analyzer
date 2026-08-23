@@ -251,13 +251,15 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
         config(config) {
             if (!config.build) config.build = {};
             /**
-             * 强制开启 sourcemap ，没有 sourcemap 只能够知道 index.js 打包后有 120 kb，有了 sourcemap 可以知道这其中 loadsh 占了 42kb，util.ts 占了 20kb...
+             * 没有 sourcemap 只能够知道 index.js 打包后有 120 kb，有了 sourcemap 可以知道这其中 loadsh 占了 42kb，util.ts 占了 20kb...
              * 它可以从打包产物追溯到源文件，这样才能进行模块化分析，否则都是空谈。
              *
              * 打包过程本质上是一个信息销毁的过程，而 sourcemap 在销毁开始前记录了一份快照，记录下来，打包完成后就可以根据这些快照来溯源
              * 在打包完成时这些快照就被编码为了 .map 文件
              */
-            config.build.sourcemap = config.build.sourcemap ?? true;
+            if (options.sourcemap !== false) {
+                config.build.sourcemap = config.build.sourcemap ?? true;
+            }
         },
 
         /** 读取最终构建输出目录 */

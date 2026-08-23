@@ -40,6 +40,7 @@ export interface AnalyzerOptions {
     fileName?: string; // JSON/HTML 文件名
     analyzerPort?: number; // server 模式端口
     openAnalyzer?: boolean; // server 模式是否自动打开浏览器
+    sourcemap?: boolean; // 是否强制开启 sourcemap，默认 true；传 false 时不修改使用方的 sourcemap 配置
     include?: FilterPattern; // 文件过滤
     exclude?: FilterPattern;
     pathFormatter?: PathFormatter; // 自定义展示路径格式化

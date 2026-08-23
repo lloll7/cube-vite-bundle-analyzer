@@ -161,4 +161,17 @@ describe('AnalyzerModule', () => {
 
         expect(leafCount).toBe(20);
     });
+
+    it('filters modules with include/exclude options', async () => {
+        const bundle = makeBundle();
+        const analyzer = new AnalyzerModule({ include: ['**/*.css'] });
+        analyzer.setupRollupChunks(bundle);
+        for (const name in bundle) {
+            await analyzer.addModule(bundle[name]);
+        }
+
+        const modules = analyzer.processModule();
+
+        expect(modules.map((m) => m.filename)).toEqual(['assets/index-GmK2cb7z.css']);
+    });
 });

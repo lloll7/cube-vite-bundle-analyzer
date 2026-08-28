@@ -2,10 +2,15 @@ import type { BrotliOptions, ZlibOptions } from 'zlib';
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import type {
+    DependencyAnalysis,
+    DuplicateModule,
     Module,
+    ModuleDetail,
+    ModuleGraphNode,
     OutputAsset,
     OutputBundle,
     OutputChunk,
+    PackageStat,
     PathFormatter,
     PluginContext,
 } from './interface.ts';
@@ -33,6 +38,8 @@ interface SerializedModWithChunk {
     dynamicImports: string[];
     /** chunk 内包含的所有 Rollup module id */
     moduleIds: string[];
+    /** chunk 内模块粒度体积（Rollup 官方口径 renderedLength/originalLength） */
+    moduleDetails: ModuleDetail[];
     isEntry: boolean;
     kind: 'chunk';
 }
@@ -114,6 +121,15 @@ function serializedMod(mod: OutputChunk | OutputAsset, chunks: OutputBundle): Se
         imports: mod.type === 'chunk' ? mod.imports : [],
         dynamicImports: mod.type === 'chunk' ? mod.dynamicImports : [],
         moduleIds: mod.type === 'chunk' ? Object.keys(mod.modules) : [],
+        moduleDetails:
+            mod.type === 'chunk'
+                ? Object.entries(mod.modules).map(([id, m]) => ({
+                      id,
+                      renderedLength: m.renderedLength,
+                      // Rollup 提供 originalLength，Rolldown 不提供；缺失时回退为 renderedLength
+                      originalLength: (m as { originalLength?: number }).originalLength ?? m.renderedLength,
+                  }))
+                : [],
         isEntry: mod.type === 'chunk' && mod.isEntry,
         kind: 'chunk',
     };
@@ -171,6 +187,30 @@ function isTextAsset(filename: string): boolean {
     return TEXT_ASSET_EXTENSIONS.has(ext);
 }
 
+/** 判断模块 id 是否来自 node_modules（Rollup module id 一般是文件路径） */
+export function isNodeModulesModule(id: string): boolean {
+    return id.split(/[\\/]/).includes('node_modules');
+}
+
+/**
+ * 从 Rollup module id 中提取 npm 包名：
+ * - `.../node_modules/lodash/index.js` → `lodash`
+ * - `.../node_modules/@scope/pkg/index.js` → `@scope/pkg`
+ * - 非 node_modules 路径返回 null
+ */
+export function extractPackageName(id: string): string | null {
+    const parts = id.split(/[\\/]/);
+    const idx = parts.indexOf('node_modules');
+    if (idx === -1) return null;
+    const rest = parts.slice(idx + 1);
+    if (!rest.length) return null;
+    // scoped 包：@scope/pkg 需要取两段
+    if (rest[0].startsWith('@') && rest[1]) {
+        return `${rest[0]}/${rest[1]}`;
+    }
+    return rest[0];
+}
+
 export class AnalyzerNode {
     /** Rollup 原始 id / 输出文件名 */
     originalId: string;
@@ -187,6 +227,16 @@ export class AnalyzerNode {
     imports: Set<string>;
     isAsset: boolean;
     isEntry: boolean;
+    /** 反向引用：依赖此 chunk 的其他 chunk 文件名 */
+    dependents: Set<string>;
+    /** chunk 内模块粒度体积（Rollup 官方口径） */
+    moduleDetails: ModuleDetail[];
+    /** 业务代码（非 node_modules）renderedLength 之和 */
+    businessSize: number;
+    /** node_modules 代码 renderedLength 之和 */
+    vendorSize: number;
+    /** 依赖包聚合（仅 chunk 内的 node_modules 包） */
+    packages: PackageStat[];
 
     constructor(originalId: string) {
         this.originalId = originalId;
@@ -200,6 +250,11 @@ export class AnalyzerNode {
         this.imports = new Set();
         this.isAsset = true;
         this.isEntry = false;
+        this.dependents = new Set();
+        this.moduleDetails = [];
+        this.businessSize = 0;
+        this.vendorSize = 0;
+        this.packages = [];
     }
 
     private addImports(...imports: string[]) {
@@ -229,11 +284,12 @@ export class AnalyzerNode {
                 gzipSize: number
             }>({ meta: { gzipSize: 0, brotliSize: 0, parsedSize: 0 } });
 
-            const { map, code, imports, dynamicImports } = mod;
+            const { map, code, imports, dynamicImports, moduleDetails } = mod;
 
             this.addImports(...imports, ...dynamicImports);
             this.isAsset = false;
             this.isEntry = mod.isEntry;
+            this.moduleDetails = moduleDetails;
 
             // chunk 体积必须用产物本身的实际字节数，而不是 source 子树的累加值
             const chunkBytes = stringToByte(code);
@@ -242,6 +298,33 @@ export class AnalyzerNode {
             this.gzipSize = gzipSize;
             this.brotliSize = brotliSize;
             this.mapSize = stringToByte(map).byteLength;
+
+            // 业务代码 vs node_modules 拆分 + 依赖包聚合（Rollup renderedLength 口径）
+            let businessSize = 0;
+            let vendorSize = 0;
+            const packageMap = new Map<string, PackageStat>();
+            for (const detail of moduleDetails) {
+                if (isNodeModulesModule(detail.id)) {
+                    vendorSize += detail.renderedLength;
+                    const pkg = extractPackageName(detail.id);
+                    if (pkg) {
+                        let stat = packageMap.get(pkg);
+                        if (!stat) {
+                            stat = { name: pkg, renderedLength: 0, modules: [] };
+                            packageMap.set(pkg, stat);
+                        }
+                        stat.renderedLength += detail.renderedLength;
+                        stat.modules.push(detail.id);
+                    }
+                } else {
+                    businessSize += detail.renderedLength;
+                }
+            }
+            this.businessSize = businessSize;
+            this.vendorSize = vendorSize;
+            this.packages = [...packageMap.values()].sort(
+                (a, b) => b.renderedLength - a.renderedLength
+            );
 
             /**
              * source 树仅用于体积归因展示，使用 source map 自带的 sourcesContent
@@ -307,6 +390,8 @@ export class AnalyzerModule {
     private matcher: ReturnType<typeof createFilter>;
     /** 路径格式化方法，用于格式化 UI 显示的路径（可自定义） */
     private pathFormatter: (path: string, defaultWD: string) => string;
+    /** 模块级依赖图（id → 依赖信息），由插件在 buildStart/buildEnd 钩子注入 */
+    private moduleGraph: Record<string, ModuleGraphNode> = {};
 
     constructor(opt: AnalyzerModuleOptions = {}) {
         this.compressAlorithm = createCompressAlorithm(opt);
@@ -316,6 +401,11 @@ export class AnalyzerModule {
         this.chunks = {};
         this.matcher = createFilter(opt.include, opt.exclude);
         this.pathFormatter = opt.pathFormatter || ((path: string) => path);
+    }
+
+    /** 由插件注入模块级依赖图（buildEnd 时遍历 this.getModuleIds() 采集） */
+    setModuleGraph(graph: Record<string, ModuleGraphNode>) {
+        this.moduleGraph = graph;
     }
 
     /**
@@ -381,12 +471,60 @@ export class AnalyzerModule {
     }
     /**
      * 导出最终 Module[] 供 UI / JSON / 自定义 analyzerMode 使用。
-     * 去掉 internal 字段 originalId，把 imports Set 转为数组
+     * 去掉 internal 字段 originalId，把 imports Set 转为数组，
+     * 并基于所有 chunk 的 imports 计算反向引用（dependents）。
      */
     processModule() {
+        // 反向引用：遍历所有 chunk 的 imports/dynamicImports，构建 filename -> dependents 映射
+        const dependentsMap = new Map<string, Set<string>>();
+        for (const mod of this.modules) {
+            if (mod.isAsset) continue;
+            for (const imp of mod.imports) {
+                if (!dependentsMap.has(imp)) dependentsMap.set(imp, new Set());
+                dependentsMap.get(imp)!.add(mod.filename);
+            }
+        }
+
         return this.modules.map((m) => {
             const { originalId: _, imports, ...rest } = m;
-            return { ...rest, imports: [...imports] };
+            return {
+                ...rest,
+                imports: [...imports],
+                dependents: m.isAsset ? [] : [...(dependentsMap.get(m.filename) ?? [])],
+            };
         }) as Module[];
+    }
+
+    /**
+     * 跨 chunk 的依赖分析：重复模块检测 + 模块级依赖图。
+     * 供终端 / 静态 HTML 输出使用，不进 Module[]（避免破坏 UI 数据结构）。
+     */
+    buildDependencyAnalysis(): DependencyAnalysis {
+        // 重复模块：同一 module id 出现在多个 chunk
+        const moduleChunkMap = new Map<string, { count: number; renderedLength: number; chunkFiles: string[] }>();
+        for (const mod of this.modules) {
+            if (mod.isAsset) continue;
+            for (const detail of mod.moduleDetails) {
+                let entry = moduleChunkMap.get(detail.id);
+                if (!entry) {
+                    entry = { count: 0, renderedLength: detail.renderedLength, chunkFiles: [] };
+                    moduleChunkMap.set(detail.id, entry);
+                }
+                entry.count++;
+                entry.chunkFiles.push(mod.filename);
+            }
+        }
+
+        const duplicates: DuplicateModule[] = [...moduleChunkMap.entries()]
+            .filter(([, info]) => info.count > 1)
+            .map(([id, info]) => ({
+                id,
+                count: info.count,
+                renderedLength: info.renderedLength,
+                chunkFiles: info.chunkFiles,
+            }))
+            .sort((a, b) => b.renderedLength - a.renderedLength);
+
+        return { duplicates, moduleGraph: this.moduleGraph };
     }
 }

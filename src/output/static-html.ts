@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import type { GroupWithNode } from '../trie.ts';
-import type { Module } from '../interface.ts';
+import type { DependencyAnalysis, Module } from '../interface.ts';
 
 /** HTML 转义，防止文件名/路径中的 < > & 等字符破坏页面结构 */
 function escapeHtml(str: string): string {
@@ -165,8 +165,118 @@ function renderModuleList(modules: Module[]): string {
         .join('');
 }
 
-/** 生成自包含的离线 HTML 报告：汇总表 + 产物列表 + source 树 + 内联 JSON 数据 */
-export function renderStaticHtml(modules: Module[]): string {
+/** 依赖分析区块：业务 vs node_modules 拆分、依赖包聚合、重复模块告警 */
+function renderDependencySection(modules: Module[], analysis: DependencyAnalysis | null): string {
+    const chunks = modules.filter((mod) => !mod.isAsset && mod.parsedSize > 0);
+
+    // 业务 vs 依赖汇总
+    const totalBusiness = chunks.reduce((sum, m) => sum + (m.businessSize ?? 0), 0);
+    const totalVendor = chunks.reduce((sum, m) => sum + (m.vendorSize ?? 0), 0);
+    const totalRendered = totalBusiness + totalVendor;
+
+    let html = '<section><h2>依赖分析</h2>';
+
+    if (totalRendered > 0) {
+        const bizPct = totalRendered ? ((totalBusiness / totalRendered) * 100).toFixed(1) : '0.0';
+        const vendorPct = totalRendered ? ((totalVendor / totalRendered) * 100).toFixed(1) : '0.0';
+        html += `
+            <div class="dep-summary">
+                <div class="dep-bar">
+                    <div class="dep-bar-business" style="width:${bizPct}%"></div>
+                    <div class="dep-bar-vendor" style="width:${vendorPct}%"></div>
+                </div>
+                <div class="dep-legend">
+                    <span class="legend-business">业务代码 ${formatSize(totalBusiness)} (${bizPct}%)</span>
+                    <span class="legend-vendor">node_modules ${formatSize(totalVendor)} (${vendorPct}%)</span>
+                </div>
+            </div>`;
+
+        // 每个 chunk 的拆分
+        html += `<table class="summary-table dep-chunk-table">
+            <thead><tr><th>chunk</th><th>业务</th><th>依赖</th><th>依赖占比</th></tr></thead><tbody>`;
+        for (const chunk of [...chunks].sort((a, b) => b.parsedSize - a.parsedSize)) {
+            const chunkTotal = (chunk.businessSize ?? 0) + (chunk.vendorSize ?? 0);
+            const pct = chunkTotal > 0 ? ((chunk.vendorSize / chunkTotal) * 100).toFixed(0) : '0';
+            html += `<tr>
+                <td>${escapeHtml(chunk.filename)}</td>
+                <td>${formatSize(chunk.businessSize ?? 0)}</td>
+                <td>${formatSize(chunk.vendorSize ?? 0)}</td>
+                <td>${pct}%</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+
+        // 依赖包 Top 10
+        const pkgMap = new Map<string, { renderedLength: number; chunkFiles: Set<string> }>();
+        for (const chunk of chunks) {
+            for (const pkg of chunk.packages ?? []) {
+                let entry = pkgMap.get(pkg.name);
+                if (!entry) {
+                    entry = { renderedLength: 0, chunkFiles: new Set() };
+                    pkgMap.set(pkg.name, entry);
+                }
+                entry.renderedLength += pkg.renderedLength;
+                entry.chunkFiles.add(chunk.filename);
+            }
+        }
+        const topPackages = [...pkgMap.entries()]
+            .map(([name, info]) => ({
+                name,
+                renderedLength: info.renderedLength,
+                chunkFiles: [...info.chunkFiles],
+            }))
+            .sort((a, b) => b.renderedLength - a.renderedLength)
+            .slice(0, 10);
+
+        if (topPackages.length) {
+            html += `<h3>依赖包 Top 10（renderedLength 口径）</h3>
+                <table class="summary-table">
+                    <thead><tr><th>包名</th><th>体积</th><th>占比</th><th>所在 chunk</th></tr></thead><tbody>`;
+            for (const pkg of topPackages) {
+                const pct = totalRendered ? ((pkg.renderedLength / totalRendered) * 100).toFixed(1) : '0.0';
+                html += `<tr>
+                    <td>${escapeHtml(pkg.name)}</td>
+                    <td>${formatSize(pkg.renderedLength)}</td>
+                    <td>${pct}%</td>
+                    <td>${pkg.chunkFiles.map(escapeHtml).join(', ')}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+        }
+    }
+
+    // 重复模块
+    const duplicates = analysis?.duplicates ?? [];
+    if (duplicates.length) {
+        html += `<h3>⚠ 重复模块 ${duplicates.length} 个（同一模块被多个 chunk 包含）</h3>
+            <table class="summary-table">
+                <thead><tr><th>模块</th><th>体积</th><th>出现次数</th><th>所在 chunk</th></tr></thead><tbody>`;
+        for (const dup of duplicates.slice(0, 20)) {
+            html += `<tr>
+                <td>${escapeHtml(dup.id)}</td>
+                <td>${formatSize(dup.renderedLength)}</td>
+                <td>${dup.count}</td>
+                <td>${dup.chunkFiles.map(escapeHtml).join(', ')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    } else if (totalRendered > 0) {
+        html += '<h3>无重复模块 ✅</h3>';
+    }
+
+    if (analysis && Object.keys(analysis.moduleGraph).length) {
+        html += `<p class="dep-graph-hint">模块级依赖图已采集（${Object.keys(analysis.moduleGraph).length} 个模块），支持反向追溯「某个依赖为什么被带进来」。</p>`;
+    }
+
+    html += '</section>';
+    return html;
+}
+
+/** 生成自包含的离线 HTML 报告：汇总表 + 产物列表 + source 树 + 依赖分析 + 内联 JSON 数据 */
+export function renderStaticHtml(
+    modules: Module[],
+    analysis: DependencyAnalysis | null = null
+): string {
     const data = JSON.stringify(modules).replace(/</g, '\\u003c');
     return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -219,6 +329,16 @@ h2 { font-size: 15px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px 
 .tree-size, .tree-gzip, .tree-brotli { min-width: 60px; text-align: right; color: var(--muted); }
 .tree-path { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tree-empty { color: var(--muted); padding: 8px; }
+.dep-summary { margin-bottom: 14px; }
+.dep-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: #eef2f7; margin-bottom: 8px; }
+.dep-bar-business { background: var(--accent); }
+.dep-bar-vendor { background: #f59e0b; }
+.dep-legend { display: flex; gap: 18px; font-size: 13px; flex-wrap: wrap; }
+.legend-business { color: var(--accent); font-weight: 600; }
+.legend-vendor { color: #b45309; font-weight: 600; }
+.dep-chunk-table { margin-bottom: 16px; }
+.dep-graph-hint { color: var(--muted); font-size: 12px; margin-top: 12px; }
+h3 { font-size: 13px; margin: 18px 0 10px; color: var(--text); }
 @media (max-width: 640px) {
     .tree-path { display: none; }
     .tree-gzip, .tree-brotli { display: none; }
@@ -234,6 +354,7 @@ h2 { font-size: 15px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px 
         <h2>资源类型汇总</h2>
         ${renderCategoryTable(modules)}
     </section>
+    ${renderDependencySection(modules, analysis)}
     <section>
         <h2>产物列表</h2>
         ${renderModuleList(modules)}
@@ -248,7 +369,8 @@ h2 { font-size: 15px; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px 
 export async function writeStaticHtmlReport(
     modules: Module[],
     outDir: string,
-    fileName = 'stats.html'
+    fileName = 'stats.html',
+    analysis: DependencyAnalysis | null = null
 ): Promise<string> {
     let html: string;
     try {
@@ -256,7 +378,7 @@ export async function writeStaticHtmlReport(
         html = await renderView(modules, { title: 'Bundle 分析报告', mode: 'parsedSize' });
     } catch {
         // 预编译模板不存在时退回简单静态报告
-        html = renderStaticHtml(modules);
+        html = renderStaticHtml(modules, analysis);
     }
     const absPath = path.isAbsolute(fileName) ? fileName : path.resolve(outDir, fileName);
     await mkdir(path.dirname(absPath), { recursive: true });

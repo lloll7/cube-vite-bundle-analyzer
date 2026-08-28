@@ -8,6 +8,18 @@ export interface GroupWithNode {
     [prop: string]: unknown;
 }
 
+export interface ModuleDetail {
+    id: string;
+    renderedLength: number;
+    originalLength: number;
+}
+
+export interface PackageStat {
+    name: string;
+    renderedLength: number;
+    modules: string[];
+}
+
 export interface Module {
     label: string;
     filename: string;
@@ -18,6 +30,11 @@ export interface Module {
     brotliSize: number;
     mapSize: number;
     imports: string[];
+    dependents: string[];
+    moduleDetails: ModuleDetail[];
+    businessSize: number;
+    vendorSize: number;
+    packages: PackageStat[];
     source: GroupWithNode[];
     groups?: GroupWithNode[];
 }

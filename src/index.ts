@@ -1,4 +1,4 @@
-import type { AnalyzerOptions, Module } from './interface.ts';
+import type { AnalyzerOptions, DependencyAnalysis, Module } from './interface.ts';
 import path from 'node:path';
 import { AnalyzerModule } from './analyzer-module.ts';
 import { writeJsonReport } from './output/json.ts';
@@ -211,6 +211,108 @@ function printEntrySummary(modules: Module[]) {
 }
 
 /**
+ * 打印依赖分析：
+ * 1. 每个 JS chunk 的业务代码 / node_modules 拆分（Rollup renderedLength 口径）
+ * 2. 依赖包聚合（哪个 npm 包占了多少、分布在哪些 chunk）
+ * 3. 重复模块告警（同一模块被打进多个 chunk）
+ * 4. 模块级依赖图已采集（用于"为什么被带进来"溯源）
+ */
+function printDependencySummary(modules: Module[], analysis: DependencyAnalysis) {
+    const chunks = modules.filter((mod) => !mod.isAsset && mod.parsedSize > 0);
+
+    // 1. 业务 vs 依赖拆分（跨所有 JS chunk 汇总）
+    const totalBusiness = chunks.reduce((sum, m) => sum + (m.businessSize ?? 0), 0);
+    const totalVendor = chunks.reduce((sum, m) => sum + (m.vendorSize ?? 0), 0);
+    const totalRendered = totalBusiness + totalVendor;
+
+    console.log('══════════════════════════════════════════════════════════════════════════');
+    console.log('  依赖分析');
+    console.log('══════════════════════════════════════════════════════════════════════════');
+
+    if (totalRendered > 0) {
+        const bizPct = ((totalBusiness / totalRendered) * 100).toFixed(1);
+        const vendorPct = ((totalVendor / totalRendered) * 100).toFixed(1);
+        console.log(
+            `  业务代码   ${formatSize(totalBusiness)}  (${bizPct}%)` +
+            `    |  node_modules  ${formatSize(totalVendor)}  (${vendorPct}%)`
+        );
+        console.log('─────────────────────────────────────────────────────────────────');
+
+        // 2. 每个 chunk 的拆分
+        console.log(
+            padRight('  chunk', 34) +
+                padRight('业务', 12) +
+                padRight('依赖', 12) +
+                '依赖占比'
+        );
+        for (const chunk of [...chunks].sort((a, b) => b.parsedSize - a.parsedSize)) {
+            const chunkTotal = (chunk.businessSize ?? 0) + (chunk.vendorSize ?? 0);
+            const pct = chunkTotal > 0 ? ((chunk.vendorSize / chunkTotal) * 100).toFixed(0) : '0';
+            console.log(
+                padRight(`  ${chunk.filename}`, 34) +
+                    padRight(formatSize(chunk.businessSize ?? 0), 12) +
+                    padRight(formatSize(chunk.vendorSize ?? 0), 12) +
+                    `${pct}%`
+            );
+        }
+        console.log('─────────────────────────────────────────────────────────────────');
+
+        // 3. 依赖包 Top 10（跨 chunk 聚合：同一包可能出现在多个 chunk）
+        const pkgMap = new Map<string, { renderedLength: number; chunkFiles: Set<string> }>();
+        for (const chunk of chunks) {
+            for (const pkg of chunk.packages ?? []) {
+                let entry = pkgMap.get(pkg.name);
+                if (!entry) {
+                    entry = { renderedLength: 0, chunkFiles: new Set() };
+                    pkgMap.set(pkg.name, entry);
+                }
+                entry.renderedLength += pkg.renderedLength;
+                entry.chunkFiles.add(chunk.filename);
+            }
+        }
+        const topPackages = [...pkgMap.entries()]
+            .map(([name, info]) => ({
+                name,
+                renderedLength: info.renderedLength,
+                chunkCount: info.chunkFiles.size,
+            }))
+            .sort((a, b) => b.renderedLength - a.renderedLength)
+            .slice(0, 10);
+
+        if (topPackages.length) {
+            console.log('  依赖包 Top 10（renderedLength 口径）:');
+            for (const pkg of topPackages) {
+                const pct = totalRendered > 0 ? ((pkg.renderedLength / totalRendered) * 100).toFixed(1) : '0.0';
+                console.log(
+                    `    ${padRight(pkg.name, 40)}${padRight(formatSize(pkg.renderedLength), 12)}` +
+                        `${pct}%  ×${pkg.chunkCount} chunk`
+                );
+            }
+            console.log('─────────────────────────────────────────────────────────────────');
+        }
+    }
+
+    // 4. 重复模块
+    if (analysis.duplicates.length) {
+        console.log(`  ⚠ 重复模块 ${analysis.duplicates.length} 个（同一模块被多个 chunk 包含）:`);
+        for (const dup of analysis.duplicates.slice(0, 10)) {
+            console.log(
+                `    ${dup.id}  (${formatSize(dup.renderedLength)} × ${dup.count})  → ${dup.chunkFiles.join(', ')}`
+            );
+        }
+        if (analysis.duplicates.length > 10) {
+            console.log(`    ... 其余 ${analysis.duplicates.length - 10} 个省略`);
+        }
+        console.log('─────────────────────────────────────────────────────────────────');
+    } else if (totalRendered > 0) {
+        console.log('  无重复模块 ✅');
+    }
+
+    const graphSize = Object.keys(analysis.moduleGraph).length;
+    console.log(`  模块级依赖图：${graphSize} 个模块（含 importers 反向引用，可追溯引入链）\n`);
+}
+
+/**
  * bundleAnalyzer 插件的主要作用：
  *   - 用于分析 Vite 或 Rollup 打包输出目录的所有文件体积和类型分布，并在打包完成后打印出详细的体积分析报告。
  *
@@ -233,6 +335,8 @@ export interface AnalyzerPlugin {
     enforce: 'post';
     config(config: any): void;
     configResolved(config: any): void;
+    buildStart(this: any): void;
+    buildEnd(this: any): void;
     generateBundle(options: any, outputBundle: any): Promise<void>;
     closeBundle(): Promise<void>;
 }
@@ -276,6 +380,37 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
                 'node_modules/.cache/vite-bundle-analyzer-lin/stats.json'
             );
         },
+
+        /** 开始采集模块级依赖图（buildEnd 时完整遍历） */
+        buildStart() {
+            analyzer.setModuleGraph({});
+        },
+
+        /**
+         * 构建阶段结束，此时模块图完整。
+         * 遍历所有 module id，记录每个模块的 importers / importedIds / isEntry，
+         * 供"某个依赖包为什么被带进来"的反向追溯使用。
+         */
+        buildEnd() {
+            const graph: Record<string, any> = {};
+            const ids: string[] =
+                typeof this.getModuleIds === 'function'
+                    ? Array.from(this.getModuleIds() as Iterable<string>)
+                    : [];
+            for (const id of ids) {
+                const info = this.getModuleInfo(id);
+                if (!info) continue;
+                graph[id] = {
+                    id,
+                    importers: [...info.importers],
+                    importedIds: [...info.importedIds],
+                    dynamicallyImportedIds: [...info.dynamicallyImportedIds],
+                    isEntry: info.isEntry,
+                    isExternal: info.isExternal,
+                };
+            }
+            analyzer.setModuleGraph(graph);
+        },
         /**
          * outputBundle 参数来源于 rollup 的 generateBundle 钩子，
          * 它包含了构建过程中所有输出文件和资源的信息。
@@ -295,6 +430,7 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
 
             const modules = analyzer.processModule();
             if (modules.length === 0) return;
+            const analysis = analyzer.buildDependencyAnalysis();
 
             // 允许 CI/测试通过环境变量覆盖输出模式，避免 server 模式挂起进程
             const analyzerMode = process.env.ANALYZER_MODE ?? options.analyzerMode;
@@ -302,6 +438,7 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
             // 终端摘要
             printTerminalSummary(modules);
             printEntrySummary(modules);
+            printDependencySummary(modules, analysis);
 
             // 构建 diff：与上一次构建的基线对比。
             // 基线存在 outDir 之外的 node_modules/.cache，避免被 Vite emptyOutDir 清掉。
@@ -329,7 +466,8 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
                 const absPath = await writeStaticHtmlReport(
                     modules,
                     outDir,
-                    options.fileName ?? 'stats.html'
+                    options.fileName ?? 'stats.html',
+                    analysis
                 );
                 console.log(`  stats written → ${absPath}\n`);
             }

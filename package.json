@@ -23,8 +23,23 @@
     "test:real": "set ANALYZER_MODE=json&& cd cube-zigbee-bridge-ultra-web && npm run build",
     "test:verify": "node scripts/verify-stats.mjs"
   },
-  "author": "",
+  "author": "lin",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/vite-bundle-analyzer-lin.git"
+  },
+  "keywords": [
+    "vite",
+    "rollup",
+    "bundle",
+    "analyzer",
+    "bundle-analyzer",
+    "体积分析"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "peerDependencies": {
     "vite": ">=3"
   },

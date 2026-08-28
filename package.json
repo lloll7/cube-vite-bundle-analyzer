@@ -14,13 +14,11 @@
   "scripts": {
     "build": "tsup",
     "prepublishOnly": "npm run build",
-    "demo:build": "vite build --config demo/vite.config.ts",
-    "demo:dev": "vite --config demo/vite.config.ts",
-    "u:build": "vite build --config cube-zigbee-bridge-ultra-web/vite.config.ts",
-    "u:dev": "vite --config cube-zigbee-bridge-ultra-web/vite.config.ts",
     "client:build": "npm --prefix client/cube-vite-bundle-analyzer-client run build",
     "precompile": "npm run client:build && node --experimental-strip-types pre-compile.ts",
     "analyze": "node --experimental-transform-types src/cli-bin.ts",
+    "real:build": "vite build --config cube-zigbee-bridge-ultra-web/vite.config.ts",
+    "real:dev": "vite --config cube-zigbee-bridge-ultra-web/vite.config.ts",
     "test": "vitest run",
     "test:real": "set ANALYZER_MODE=json&& cd cube-zigbee-bridge-ultra-web && npm run build",
     "test:verify": "node scripts/verify-stats.mjs"

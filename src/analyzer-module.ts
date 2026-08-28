@@ -15,7 +15,7 @@ import type {
     PluginContext,
 } from './interface.ts';
 import type { FilterPattern } from 'vite';
-import { createBrotil, createGzip, stringToByte } from './shared.ts';
+import { byteToString, createBrotil, createGzip, stringToByte } from './shared.ts';
 import { Trie } from './trie.ts';
 import type { GroupWithNode } from './trie.ts'
 import { createFilter } from '@rollup/pluginutils';
@@ -65,7 +65,9 @@ export const JS_EXTENSIONS = /\.(c|m)?js$/;
 
 function findSourcemap(fileName: string, sourcemapFileName: string, chunks: OutputBundle) {
     if (sourcemapFileName in chunks) {
-        return (chunks[sourcemapFileName] as OutputAsset).source as string;
+        // Rolldown/Vite 的 asset.source 可能是 string 或 Uint8Array，统一转 string 供 JSON.parse
+        const raw = (chunks[sourcemapFileName] as OutputAsset).source;
+        return typeof raw === 'string' ? raw : byteToString(raw);
     }
     throw new Error(`[analyzer error]: Missing sourcemap for ${fileName}.`);
 }

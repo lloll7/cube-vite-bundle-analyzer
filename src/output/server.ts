@@ -1,8 +1,8 @@
 import http from 'node:http';
 import net from 'node:net';
+import { exec } from 'node:child_process';
 import type { Module } from '../interface.ts';
 import { renderStaticHtml } from './static-html.ts';
-import { exec } from 'node:child_process';
 
 /** 探测端口是否可用；返回 true 表示可以监听 */
 function checkPortAvailable(port: number): Promise<boolean> {
@@ -21,6 +21,22 @@ export async function ensureEmptyPort(preferredPort: number): Promise<number> {
         port++;
     }
     return port;
+}
+
+/** 跨平台打开浏览器：Windows 用 start，macOS 用 open，Linux 用 xdg-open */
+function openBrowser(url: string) {
+    const platform = process.platform;
+    const command =
+        platform === 'win32'
+            ? `start ${url}`
+            : platform === 'darwin'
+              ? `open ${url}`
+              : `xdg-open ${url}`;
+    exec(command, (err) => {
+        if (err) {
+            console.log(`  无法自动打开浏览器（${platform}）: ${err.message}`);
+        }
+    });
 }
 
 export async function startServer(modules: Module[], options?: { port?: number, openAnalyzer?: boolean }): Promise<http.Server> {
@@ -51,7 +67,7 @@ export async function startServer(modules: Module[], options?: { port?: number, 
         server.listen(port, () => {
             server.removeListener('error', reject);
             console.log(`  analyzer server → http://localhost:${port}`);
-            if (options?.openAnalyzer) exec(`start http://localhost:${port}`);
+            if (options?.openAnalyzer) openBrowser(`http://localhost:${port}`);
             resolve(server);
         });
     });

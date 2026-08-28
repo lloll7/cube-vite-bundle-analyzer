@@ -39,7 +39,6 @@
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "@jridgewell/source-map": "^0.3.11",
     "@rollup/pluginutils": "^5.4.0"
   }
 }

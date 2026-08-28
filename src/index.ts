@@ -4,6 +4,8 @@ import { AnalyzerModule } from './analyzer-module.ts';
 import { writeJsonReport } from './output/json.ts';
 import { writeStaticHtmlReport } from './output/static-html.ts';
 import { EFileType } from './type/enum/EFileType.ts';
+import { buildDiff, loadPreviousStats, printDiffReport } from './diff.ts';
+import { checkBudget, printBudgetReport } from './budget.ts';
 
 /** Vite/Rollup bundle item 的通用形状 */
 /**
@@ -242,6 +244,9 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
         pathFormatter: options.pathFormatter,
     });
     let outDir = 'dist';
+    // diff 历史基线路径：放在 outDir 之外的持久位置（node_modules/.cache），
+    // 避免 Vite 的 emptyOutDir 在每次构建时清掉上一次的 stats.json
+    let diffBaselineFile = '';
 
     return {
         name: 'vite-bundle-analyzer',
@@ -265,6 +270,11 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
         /** 读取最终构建输出目录 */
         configResolved(config) {
             outDir = path.resolve(config.root, config.build.outDir ?? 'dist');
+            // diff 基线存放在项目根 node_modules/.cache 下，随项目持久，不受 outDir 清空影响
+            diffBaselineFile = path.resolve(
+                config.root,
+                'node_modules/.cache/vite-bundle-analyzer-lin/stats.json'
+            );
         },
         /**
          * outputBundle 参数来源于 rollup 的 generateBundle 钩子，
@@ -293,6 +303,17 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
             printTerminalSummary(modules);
             printEntrySummary(modules);
 
+            // 构建 diff：与上一次构建的基线对比。
+            // 基线存在 outDir 之外的 node_modules/.cache，避免被 Vite emptyOutDir 清掉。
+            if (options.diff) {
+                const previous = await loadPreviousStats(diffBaselineFile);
+                if (previous.length > 0) {
+                    printDiffReport(buildDiff(modules, previous));
+                } else {
+                    console.log('  ⚠ diff 开启但未找到上一次基线，跳过对比（首次构建）\n');
+                }
+            }
+
             // JSON 输出
             if (analyzerMode === 'json') {
                 const absPath = await writeJsonReport(
@@ -311,6 +332,21 @@ export function bundleAnalyzer(options: AnalyzerOptions = {}): AnalyzerPlugin {
                     options.fileName ?? 'stats.html'
                 );
                 console.log(`  stats written → ${absPath}\n`);
+            }
+
+            // 更新 diff 基线（本次结果作为下一次对比基准）。
+            // 注意：必须在 diff 对比完成之后再写，否则对比到的是本次自身。
+            if (options.diff) {
+                await writeJsonReport(modules, path.dirname(diffBaselineFile), path.basename(diffBaselineFile));
+            }
+
+            // 体积预算（CI 门槛）：超限置退出码 1，CI 可据此拦截
+            if (options.budget) {
+                const violations = checkBudget(modules, options.budget);
+                printBudgetReport(violations);
+                if (violations.length > 0) {
+                    process.exitCode = 1;
+                }
             }
 
             if (analyzerMode === 'server') {

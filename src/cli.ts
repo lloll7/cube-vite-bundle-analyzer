@@ -16,6 +16,8 @@ export interface CliOptions {
     analyzerMode?: AnalyzerMode;
     analyzerPort?: number;
     openAnalyzer?: boolean;
+    /** 与上一次 stats.json 对比输出构建 diff */
+    diff?: boolean;
 }
 
 /** 打印命令行帮助信息 */
@@ -28,6 +30,7 @@ Options:
   -m, --mode <mode>     Analyzer output mode: json | static | server (default: server)
   -p, --port <port>     Server mode port (default: 8888)
   -o, --open            Open browser after server starts 启动后打开浏览器
+  -d, --diff            Compare with previous stats.json 与上次构建对比输出 diff
   -h, --help            Show this help 打印帮助
 `);
 }
@@ -79,6 +82,11 @@ export function parseCliArgs(argv: string[]): CliOptions {
                 // server 模式启动后自动打开浏览器
                 options.openAnalyzer = true;
                 break;
+            case '-d':
+            case '--diff':
+                // 与上一次 stats.json 对比输出构建 diff
+                options.diff = true;
+                break;
             default:
                 // 未知参数直接报错并提示帮助
                 console.error(`Unknown option: ${arg}`);
@@ -96,6 +104,7 @@ export function createAnalyzerOptions(options: CliOptions): AnalyzerOptions {
         analyzerMode: options.analyzerMode ?? 'server',
         analyzerPort: options.analyzerPort,
         openAnalyzer: options.openAnalyzer,
+        diff: options.diff,
     };
 }
 

@@ -23,10 +23,26 @@ describe('parseCliArgs', () => {
             openAnalyzer: true,
         });
     });
+
+    it('parses --diff short and long option names', () => {
+        expect(parseCliArgs(['-d'])).toEqual({ diff: true });
+        expect(parseCliArgs(['--diff'])).toEqual({ diff: true });
+        expect(parseCliArgs(['-m', 'json', '--diff'])).toEqual({
+            analyzerMode: 'json',
+            diff: true,
+        });
+    });
 });
 
 describe('createAnalyzerOptions', () => {
     it('defaults to server mode', () => {
         expect(createAnalyzerOptions({})).toEqual({ analyzerMode: 'server' });
+    });
+
+    it('passes diff flag through', () => {
+        expect(createAnalyzerOptions({ diff: true })).toEqual({
+            analyzerMode: 'server',
+            diff: true,
+        });
     });
 });

@@ -44,6 +44,44 @@ export interface AnalyzerOptions {
     include?: FilterPattern; // 文件过滤
     exclude?: FilterPattern;
     pathFormatter?: PathFormatter; // 自定义展示路径格式化
+    /**
+     * 体积预算（CI 门槛）：构建后检查，超限打印告警并置退出码 1。
+     * 单位均为字节。
+     */
+    budget?: BudgetOptions;
+    /**
+     * 是否与上一次 stats.json 对比输出 diff（构建 diff）。
+     * 默认 false；开启后会把本次构建与磁盘上已存在的 stats.json 对比。
+     */
+    diff?: boolean;
+}
+
+/** 体积预算阈值（单位：字节） */
+export interface BudgetOptions {
+    /** 所有 JS chunk 的 parsedSize 总和上限 */
+    totalParsedSize?: number;
+    /** 所有 JS chunk 的 gzipSize 总和上限 */
+    totalGzipSize?: number;
+    /** 单个入口 chunk 的 parsedSize 上限 */
+    entryParsedSize?: number;
+    /** 单个入口 chunk 的 gzipSize 上限 */
+    entryGzipSize?: number;
+    /** 单个 JS chunk 的 parsedSize 上限（含非入口） */
+    chunkParsedSize?: number;
+}
+
+/** 预算违规项 */
+export interface BudgetViolation {
+    /** 违规类型：总量 / 入口 / 单个 chunk */
+    type: 'total' | 'entry' | 'chunk';
+    /** 对象标识：总量为 'total'，入口/chunk 为文件名 */
+    name: string;
+    /** 阈值（字节） */
+    limit: number;
+    /** 实际值（字节） */
+    actual: number;
+    /** 超限量（字节，正数） */
+    excess: number;
 }
 
 export type PathFormatter = (path: string, defaultWD: string) => string;

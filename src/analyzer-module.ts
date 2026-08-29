@@ -95,11 +95,17 @@ function serializedMod(mod: OutputChunk | OutputAsset, chunks: OutputBundle): Se
         };
     }
 
-    // 查找 source map：优先用 Rollup 提供的 sourcemapFileName，否则尝试 filename.map
+    // 查找 source map：优先用 chunk 自带的内联 map（Vite/Rolldown 的 mod.map 字段），
+    // 其次用 Rollup 提供的 sourcemapFileName，最后尝试 filename.map 独立文件。
     let sourcemap = '';
     // 是 JS asset
     if (JS_EXTENSIONS.test(mod.fileName)) {
-        if ('sourcemapFileName' in mod) {
+        // Vite 8/Rolldown 的 OutputChunk 带 map 字段（内联 SourceMap 对象），
+        // outputBundle 里通常没有独立 .map asset，只有 Worker 等少数 chunk 才有
+        if (mod.type === 'chunk' && mod.map) {
+            sourcemap = JSON.stringify(mod.map);
+        }
+        if (!sourcemap && 'sourcemapFileName' in mod) {
             if (mod.sourcemapFileName && mod.sourcemapFileName in chunks) {
                 // 读取 source map 内容
                 sourcemap = findSourcemap(mod.fileName, mod.sourcemapFileName, chunks);

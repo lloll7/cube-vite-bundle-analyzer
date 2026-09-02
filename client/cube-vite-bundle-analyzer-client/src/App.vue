@@ -187,10 +187,12 @@ h1 {
     flex-direction: column;
     min-width: 0;
     min-height: 560px;
+    height: min(78vh, 860px);
 }
 .treemap-panel :deep(.treemap) {
     flex: 1;
-    min-height: 560px;
+    min-height: 0;
+    height: 100%;
 }
 .panel-head {
     display: flex;

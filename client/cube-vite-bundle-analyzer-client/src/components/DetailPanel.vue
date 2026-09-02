@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { Dimension, GroupWithNode, Module } from '../types';
 import { formatSize } from '../utils';
 import SourceTree from './SourceTree.vue';
@@ -14,6 +14,17 @@ const emit = defineEmits<{
     backTo: [path: string];
     selectSource: [path: string];
 }>();
+
+/** imports 区折叠状态：默认收起，避免依赖列表过长时撑高面板产生大片留白 */
+const importsOpen = ref(false);
+
+// 切换选中模块时重置为收起，避免反复点击面板时一直处于展开状态
+watch(
+    () => props.module?.filename,
+    () => {
+        importsOpen.value = false;
+    }
+);
 
 function findNode(nodes: GroupWithNode[], target: string): GroupWithNode | null {
     for (const node of nodes) {
@@ -86,11 +97,22 @@ function handleBack() {
             <div class="active-size">当前维度：{{ formatSize(activeSize) }}</div>
 
             <section class="detail-section">
-                <div class="section-title">imports ({{ module.imports.length }})</div>
-                <div v-if="module.imports.length" class="import-list">
+                <button
+                    type="button"
+                    class="section-title collapsible"
+                    :aria-expanded="importsOpen"
+                    @click="importsOpen = !importsOpen"
+                >
+                    <span class="collapse-icon" :class="{ open: importsOpen }">▸</span>
+                    <span>imports ({{ module.imports.length }})</span>
+                    <span v-if="!importsOpen && module.imports.length" class="collapse-hint">
+                        展开查看 {{ module.imports.length }} 条
+                    </span>
+                </button>
+                <div v-if="importsOpen && module.imports.length" class="import-list import-scroll">
                     <div v-for="imp in module.imports" :key="imp" class="import-item">{{ imp }}</div>
                 </div>
-                <div v-else class="section-empty">无直接依赖</div>
+                <div v-if="importsOpen && !module.imports.length" class="section-empty">无直接依赖</div>
             </section>
 
             <section class="detail-section source-section">
@@ -227,14 +249,56 @@ function handleBack() {
     color: var(--text);
     margin-bottom: 8px;
 }
+/* 可折叠标题：整行可点击，hover 高亮 */
+.section-title.collapsible {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    margin-bottom: 0;
+    color: var(--text);
+}
+.section-title.collapsible:hover {
+    color: var(--accent);
+}
+.collapse-icon {
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.15s ease;
+    color: var(--muted);
+}
+.collapse-icon.open {
+    transform: rotate(90deg);
+}
+.collapse-hint {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+}
 .section-empty {
     font-size: 12px;
     color: var(--muted);
+    padding-top: 8px;
 }
 .import-list {
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+/* 展开后的 imports 限高滚动：避免依赖过多时撑高面板 */
+.import-scroll {
+    margin-top: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--border-soft);
+    border-radius: 4px;
+    padding: 6px;
 }
 .import-item {
     font-size: 12px;

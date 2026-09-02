@@ -33,11 +33,105 @@ const boxes = ref<Box[]>([]);
 const hovered = ref<TreemapNode | null>(null);
 const selectedPath = ref('');
 const tree = ref<TreemapNode>(createNode('', ''));
-const viewWidth = ref(0);
-const viewHeight = ref(0);
+// viewBox 尺寸：由 ResizeObserver 按容器真实像素更新（无留白、不变形）
+const viewWidth = ref(1000);
+const viewHeight = ref(700);
 let observer: ResizeObserver | null = null;
-let lastWidth = 0;
-let lastHeight = 0;
+
+/**
+ * 防循环设计说明：
+ * - SVG 已 absolute 定位 + .tree-body overflow:hidden，SVG 内部重绘不会改变容器尺寸，
+ *   因此 ResizeObserver 不会因重绘而再次触发 → 不会出现早期 "viewBox 写回 → 容器变大
+ *   → ResizeObserver → 再写回" 的正反馈放大回路。
+ * - 数据/维度/层级变化 → rebuildTree + layout（完整重绘）
+ * - 仅容器尺寸变化 → 同步 viewBox 后 layout（boxes 坐标必须按新尺寸重算，否则下方留白）
+ */
+
+/** 依据 items 重建 Trie 树 */
+function rebuildTree() {
+    tree.value = buildTree(props.items);
+    if (selectedPath.value && !findNode(tree.value, selectedPath.value)) {
+        selectedPath.value = '';
+    }
+}
+
+/** 用当前树 + viewWidth/viewHeight 计算 treemap 布局，生成 boxes */
+function layout() {
+    if (!props.items.length || !viewWidth.value || !viewHeight.value) {
+        boxes.value = [];
+        return;
+    }
+
+    const scope = getScopeNode();
+    const data = { children: scope.children };
+    const root = hierarchy(data as unknown as TreemapNode, (d) =>
+        d.children.length ? d.children : null
+    );
+    root.sum((d) =>
+        d.children.length ? 0 : Math.sqrt(Math.max(0, d[props.dimension] ?? 0))
+    );
+
+    const treemapLayout = treemap<TreemapNode>()
+        .size([viewWidth.value, viewHeight.value])
+        .tile(treemapResquarify)
+        .paddingOuter(3)
+        .paddingTop(TOP_PADDING)
+        .paddingInner(2)
+        .round(true);
+    const rectRoot = treemapLayout(root);
+
+    boxes.value = rectRoot
+        .descendants()
+        .filter((node) => node.depth > 0)
+        .map((node) => ({
+            node: node.data,
+            x: node.x0,
+            y: node.y0,
+            width: Math.max(0, node.x1 - node.x0),
+            height: Math.max(0, node.y1 - node.y0),
+        }));
+}
+
+/** 完整重绘：数据 / 维度 / 层级变化时调用 */
+function draw() {
+    rebuildTree();
+    layout();
+}
+
+/** 同步容器尺寸到 viewBox；尺寸变化返回 true（调用方应随后重算布局） */
+function syncViewBox(): boolean {
+    const el = viewRef.value;
+    if (!el) return false;
+    const w = Math.max(320, el.clientWidth);
+    const h = Math.max(280, el.clientHeight);
+    if (w !== viewWidth.value || h !== viewHeight.value) {
+        viewWidth.value = w;
+        viewHeight.value = h;
+        return true;
+    }
+    return false;
+}
+
+/** ResizeObserver 回调：尺寸变了必须重算布局，否则 boxes 与 viewBox 不匹配导致留白 */
+function handleResize() {
+    if (syncViewBox()) {
+        layout();
+    }
+}
+
+onMounted(() => {
+    syncViewBox();
+    draw();
+    observer = new ResizeObserver(handleResize);
+    if (viewRef.value) observer.observe(viewRef.value);
+});
+
+onUnmounted(() => observer?.disconnect());
+
+watch([() => props.items, () => props.dimension, selectedPath], () => {
+    syncViewBox();
+    draw();
+});
 
 function createNode(name: string, path: string): TreemapNode {
     return {
@@ -153,86 +247,13 @@ function nodeColor(node: TreemapNode): string {
 }
 
 function textFontSize(box: Box, isSize = false): number {
-    const widthBudget = Math.max(0, box.width - 10);
-    const heightBudget = Math.max(0, box.height - (isSize ? 12 : 8));
-    const maxSize = isSize ? 11 : 12;
+    const widthBudget = Math.max(0, box.width - (isSize ? 12 : 6));
+    const heightBudget = Math.max(0, box.height - (isSize ? 12 : 5));
+    const maxSize = isSize ? 11 : 13;
     const sizeByWidth = Math.floor(widthBudget / 8);
-    const sizeByHeight = Math.floor(heightBudget / (isSize ? 2.4 : 2));
-    return Math.max(7, Math.min(maxSize, sizeByWidth, sizeByHeight));
+    const sizeByHeight = Math.floor(heightBudget / (isSize ? 2.4 : 1.9));
+    return Math.max(6, Math.min(maxSize, sizeByWidth, sizeByHeight));
 }
-
-function measure() {
-    const el = viewRef.value;
-    if (!el) return;
-    const width = Math.max(320, el.clientWidth);
-    const height = Math.max(280, el.clientHeight);
-    if (width === lastWidth && height === lastHeight) {
-        return false;
-    }
-    lastWidth = width;
-    lastHeight = height;
-    viewWidth.value = width;
-    viewHeight.value = height;
-    return true;
-}
-
-function draw() {
-    if (!measure() && boxes.value.length) {
-        return;
-    }
-
-    tree.value = buildTree(props.items);
-    if (selectedPath.value && !findNode(tree.value, selectedPath.value)) {
-        selectedPath.value = '';
-    }
-    if (!props.items.length || !viewWidth.value || !viewHeight.value) {
-        boxes.value = [];
-        return;
-    }
-
-    const scope = getScopeNode();
-    const data = { children: scope.children };
-    const root = hierarchy(data as unknown as TreemapNode, (d) =>
-        d.children.length ? d.children : null
-    );
-    root.sum((d) =>
-        d.children.length ? 0 : Math.sqrt(Math.max(0, d[props.dimension] ?? 0))
-    );
-
-    const layout = treemap<TreemapNode>()
-        .size([viewWidth.value, viewHeight.value])
-        .tile(treemapResquarify)
-        .paddingOuter(3)
-        .paddingTop(TOP_PADDING)
-        .paddingInner(2)
-        .round(true);
-    const rectRoot = layout(root);
-
-    boxes.value = rectRoot
-        .descendants()
-        .filter((node) => node.depth > 0)
-        .map((node) => ({
-            node: node.data,
-            x: node.x0,
-            y: node.y0,
-            width: Math.max(0, node.x1 - node.x0),
-            height: Math.max(0, node.y1 - node.y0),
-        }));
-}
-
-onMounted(() => {
-    observer = new ResizeObserver(() => draw());
-    if (viewRef.value) observer.observe(viewRef.value);
-    draw();
-});
-
-onUnmounted(() => observer?.disconnect());
-
-watch([() => props.items, () => props.dimension, selectedPath], () => {
-    lastWidth = 0;
-    lastHeight = 0;
-    draw();
-});
 </script>
 
 <template>
@@ -288,20 +309,20 @@ watch([() => props.items, () => props.dimension, selectedPath], () => {
                         @click="handleNodeClick(box.node)"
                     />
                     <text
-                        v-if="box.node.children.length && box.width > 30 && box.height > 14"
+                        v-if="box.node.children.length && box.width > 26 && box.height > 9"
                         class="cell-label dir-label"
-                        :x="box.x + 6"
-                        :y="box.y + 13"
+                        :x="box.x + 4"
+                        :y="box.y + 12"
                         :font-size="textFontSize(box)"
                         :clip-path="`url(#cell-clip-${index})`"
                     >
                         {{ box.node.name }}
                     </text>
                     <text
-                        v-else-if="!box.node.children.length && box.width > 46 && box.height > 18"
+                        v-else-if="!box.node.children.length && box.width > 34 && box.height > 13"
                         class="cell-label"
-                        :x="box.x + 6"
-                        :y="box.y + 14"
+                        :x="box.x + 4"
+                        :y="box.y + 12"
                         :font-size="textFontSize(box)"
                         :clip-path="`url(#cell-clip-${index})`"
                     >
@@ -376,9 +397,12 @@ watch([() => props.items, () => props.dimension, selectedPath], () => {
     position: relative;
     flex: 1;
     min-height: 0;
+    overflow: hidden;
 }
 svg {
     display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
 }
@@ -440,3 +464,6 @@ rect {
     font-size: 13px;
 }
 </style>
+
+
+
